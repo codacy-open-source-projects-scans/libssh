@@ -266,66 +266,38 @@ error:
     return NULL;
 }
 
-int sftp_server_init(sftp_session sftp){
-  ssh_session session = sftp->session;
-  sftp_packet packet = NULL;
-  ssh_buffer reply = NULL;
-  uint32_t version;
-  int rc;
+/* @deprecated in favor of sftp_server_new() and callbacks based sftp server */
+int sftp_server_init(sftp_session sftp)
+{
+    ssh_session session = sftp->session;
+    sftp_client_message msg = NULL;
+    int rc;
 
-  packet = sftp_packet_read(sftp);
-  if (packet == NULL) {
-    return -1;
-  }
+    /* handles setting the sftp->client_version */
+    msg = sftp_get_client_message(sftp);
+    if (msg == NULL) {
+        return -1;
+    }
 
-  if (packet->type != SSH_FXP_INIT) {
-    ssh_set_error(session, SSH_FATAL,
-        "Packet read of type %d instead of SSH_FXP_INIT",
-        packet->type);
+    if (msg->type != SSH_FXP_INIT) {
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "Packet read of type %d instead of SSH_FXP_INIT",
+                      msg->type);
+        return -1;
+    }
 
-    return -1;
-  }
+    SSH_LOG(SSH_LOG_PACKET, "Received SSH_FXP_INIT");
 
-  SSH_LOG(SSH_LOG_PACKET, "Received SSH_FXP_INIT");
+    rc = sftp_reply_version(msg);
+    if (rc != SSH_OK) {
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "Failed to process the SSH_FXP_INIT message");
+        return -1;
+    }
 
-  ssh_buffer_get_u32(packet->payload, &version);
-  version = ntohl(version);
-  SSH_LOG(SSH_LOG_PACKET, "Client version: %" PRIu32, version);
-  sftp->client_version = (int)version;
-
-  reply = ssh_buffer_new();
-  if (reply == NULL) {
-    ssh_set_error_oom(session);
-    return -1;
-  }
-
-  rc = ssh_buffer_pack(reply, "dssss",
-                      LIBSFTP_VERSION,
-                      "posix-rename@openssh.com",
-                      "1",
-                      "hardlink@openssh.com",
-                      "1");
-  if (rc != SSH_OK) {
-    ssh_set_error_oom(session);
-    SSH_BUFFER_FREE(reply);
-    return -1;
-  }
-
-  if (sftp_packet_write(sftp, SSH_FXP_VERSION, reply) < 0) {
-    SSH_BUFFER_FREE(reply);
-    return -1;
-  }
-  SSH_BUFFER_FREE(reply);
-
-  SSH_LOG(SSH_LOG_DEBUG, "Server version sent");
-
-  if (version > LIBSFTP_VERSION) {
-    sftp->version = LIBSFTP_VERSION;
-  } else {
-    sftp->version = (int)version;
-  }
-
-  return 0;
+    return 0;
 }
 
 void sftp_server_free(sftp_session sftp)
@@ -353,6 +325,7 @@ void sftp_server_free(sftp_session sftp)
 
     SAFE_FREE(sftp);
 }
+
 #endif /* WITH_SERVER */
 
 void sftp_free(sftp_session sftp)
@@ -385,6 +358,56 @@ void sftp_free(sftp_session sftp)
     sftp_ext_free(sftp->ext);
 
     SAFE_FREE(sftp);
+}
+
+/* @internal
+ * Process the incoming data and copy them from the SSH packet buffer to the
+ * SFTP packet buffer.
+ * @returns number of decoded bytes.
+ */
+int
+sftp_decode_channel_data_to_packet(sftp_session sftp, void *data, uint32_t len)
+{
+    sftp_packet packet = sftp->read_packet;
+    int nread;
+    int payload_len;
+    unsigned int data_offset;
+    int to_read;
+
+    if (packet->sftp == NULL) {
+        packet->sftp = sftp;
+    }
+
+    data_offset = sizeof(uint32_t) + sizeof(uint8_t);
+    /* not enough bytes to read */
+    if (len < data_offset) {
+        return SSH_ERROR;
+    }
+
+    payload_len = PULL_BE_U32(data, 0);
+    packet->type = PULL_BE_U8(data, 4);
+
+    /* We should check the legality of payload length */
+    if (payload_len + sizeof(uint32_t) > len || payload_len < 0) {
+        return SSH_ERROR;
+    }
+
+    to_read = payload_len - sizeof(uint8_t);
+    ssh_buffer_add_data(packet->payload,
+                        (void*)((uint8_t *)data + data_offset),
+                        to_read);
+    nread = ssh_buffer_get_len(packet->payload);
+
+    /* We should check if we copied the whole data */
+    if (nread != to_read) {
+        return SSH_ERROR;
+    }
+
+    /*
+     * We should return how many bytes we decoded, including packet length header
+     * and the payload length.
+     */
+    return payload_len + sizeof(uint32_t);
 }
 
 int sftp_packet_write(sftp_session sftp, uint8_t type, ssh_buffer payload)
@@ -1014,7 +1037,7 @@ sftp_dir sftp_opendir(sftp_session sftp, const char *path)
     sftp_file file = NULL;
     sftp_dir dir = NULL;
     sftp_status_message status;
-    ssh_buffer payload;
+    ssh_buffer payload = NULL;
     uint32_t id;
     int rc;
 
@@ -1065,7 +1088,7 @@ sftp_dir sftp_opendir(sftp_session sftp, const char *path)
             }
             sftp_set_error(sftp, status->status);
             ssh_set_error(sftp->session, SSH_REQUEST_DENIED,
-                    "SFTP server: %s", status->errormsg);
+                          "SFTP server: %s", status->errormsg);
             status_msg_free(status);
             return NULL;
         case SSH_FXP_HANDLE:
@@ -1092,7 +1115,8 @@ sftp_dir sftp_opendir(sftp_session sftp, const char *path)
             return dir;
         default:
             ssh_set_error(sftp->session, SSH_FATAL,
-                    "Received message %d during opendir!", msg->packet_type);
+                          "Received message %d during opendir!",
+                          msg->packet_type);
             sftp_message_free(msg);
     }
 
@@ -1796,7 +1820,7 @@ sftp_file sftp_open(sftp_session sftp,
     sftp_status_message status;
     struct sftp_attributes_struct attr;
     sftp_file handle;
-    ssh_buffer buffer;
+    ssh_buffer buffer = NULL;
     sftp_attributes stat_data;
     uint32_t sftp_flags = 0;
     uint32_t id;
@@ -1828,7 +1852,8 @@ sftp_file sftp_open(sftp_session sftp,
     if ((flags & O_APPEND) == O_APPEND) {
         sftp_flags |= SSH_FXF_APPEND;
     }
-    SSH_LOG(SSH_LOG_PACKET, "Opening file %s with sftp flags %" PRIx32, file, sftp_flags);
+    SSH_LOG(SSH_LOG_PACKET, "Opening file %s with sftp flags %" PRIx32,
+            file, sftp_flags);
     id = sftp_get_new_id(sftp);
 
     rc = ssh_buffer_pack(buffer,
@@ -1866,57 +1891,61 @@ sftp_file sftp_open(sftp_session sftp,
     }
 
     switch (msg->packet_type) {
-        case SSH_FXP_STATUS:
-            status = parse_status_msg(msg);
-            sftp_message_free(msg);
-            if (status == NULL) {
-                return NULL;
-            }
-            sftp_set_error(sftp, status->status);
-            ssh_set_error(sftp->session, SSH_REQUEST_DENIED,
-                    "SFTP server: %s", status->errormsg);
-            status_msg_free(status);
-
+    case SSH_FXP_STATUS:
+        status = parse_status_msg(msg);
+        sftp_message_free(msg);
+        if (status == NULL) {
             return NULL;
-        case SSH_FXP_HANDLE:
-            handle = parse_handle_msg(msg);
-            if (handle == NULL) {
+        }
+        sftp_set_error(sftp, status->status);
+        ssh_set_error(sftp->session, SSH_REQUEST_DENIED,
+                      "SFTP server: %s", status->errormsg);
+        status_msg_free(status);
+
+        return NULL;
+    case SSH_FXP_HANDLE:
+        handle = parse_handle_msg(msg);
+        if (handle == NULL) {
+            return NULL;
+        }
+        sftp_message_free(msg);
+        if ((flags & O_APPEND) == O_APPEND) {
+            stat_data = sftp_stat(sftp, file);
+            if (stat_data == NULL) {
+                sftp_close(handle);
                 return NULL;
             }
-            sftp_message_free(msg);
-            if ((flags & O_APPEND) == O_APPEND) {
-                stat_data = sftp_stat(sftp, file);
-                if (stat_data == NULL) {
-                    sftp_close(handle);
-                    return NULL;
-                }
-                if ((stat_data->flags & SSH_FILEXFER_ATTR_SIZE) != SSH_FILEXFER_ATTR_SIZE) {
-                    ssh_set_error(sftp->session,
-                            SSH_FATAL,
-                            "Cannot open in append mode. Unknown file size.");
-                    sftp_close(handle);
-                    sftp_set_error(sftp, SSH_FX_FAILURE);
-                    return NULL;
-                }
-
-                handle->offset = stat_data->size;
+            if ((stat_data->flags & SSH_FILEXFER_ATTR_SIZE) != SSH_FILEXFER_ATTR_SIZE) {
+                ssh_set_error(sftp->session,
+                              SSH_FATAL,
+                              "Cannot open in append mode. Unknown file size.");
+                sftp_attributes_free(stat_data);
+                sftp_close(handle);
+                sftp_set_error(sftp, SSH_FX_FAILURE);
+                return NULL;
             }
-            return handle;
-        default:
-            ssh_set_error(sftp->session, SSH_FATAL,
-                    "Received message %d during open!", msg->packet_type);
-            sftp_message_free(msg);
-            sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
+
+            handle->offset = stat_data->size;
+            sftp_attributes_free(stat_data);
+        }
+        return handle;
+    default:
+        ssh_set_error(sftp->session, SSH_FATAL,
+                      "Received message %d during open!", msg->packet_type);
+        sftp_message_free(msg);
+        sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
     }
 
     return NULL;
 }
 
-void sftp_file_set_nonblocking(sftp_file handle){
-    handle->nonblocking=1;
+void sftp_file_set_nonblocking(sftp_file handle)
+{
+    handle->nonblocking = 1;
 }
-void sftp_file_set_blocking(sftp_file handle){
-    handle->nonblocking=0;
+void sftp_file_set_blocking(sftp_file handle)
+{
+    handle->nonblocking = 0;
 }
 
 /* Read from a file using an opened sftp file handle. */
@@ -2764,7 +2793,8 @@ int sftp_utimes(sftp_session sftp, const char *file,
   return sftp_setstat(sftp, file, &attr);
 }
 
-int sftp_symlink(sftp_session sftp, const char *target, const char *dest) {
+int sftp_symlink(sftp_session sftp, const char *target, const char *dest)
+{
   sftp_status_message status = NULL;
   sftp_message msg = NULL;
   ssh_buffer buffer;
@@ -2788,7 +2818,10 @@ int sftp_symlink(sftp_session sftp, const char *target, const char *dest) {
 
   id = sftp_get_new_id(sftp);
 
-  /* TODO check for version number if they ever fix it. */
+  /* The OpenSSH sftp server has order of the arguments reversed, see the
+   * section "4.1 sftp: Reversal of arguments to SSH_FXP_SYMLINK' in
+   * https://github.com/openssh/openssh-portable/blob/master/PROTOCOL
+   * for more information */
   if (ssh_get_openssh_version(sftp->session)) {
       rc = ssh_buffer_pack(buffer,
                            "dss",
