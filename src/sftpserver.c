@@ -717,8 +717,7 @@ void sftp_handle_remove(sftp_session sftp, void *handle)
 static const char *
 ssh_str_error(int u_errno)
 {
-    switch (u_errno)
-    {
+    switch (u_errno) {
     case SSH_FX_NO_SUCH_FILE:
         return "No such file";
     case SSH_FX_PERMISSION_DENIED:
@@ -730,7 +729,6 @@ ssh_str_error(int u_errno)
     default:
         return "Operation failed";
     }
-    return "Operation failed";
 }
 
 static int
@@ -905,6 +903,7 @@ process_open(sftp_client_message client_msg)
 
     h = calloc(1, sizeof (struct sftp_handle));
     if (h == NULL) {
+        close(fd);
         SSH_LOG(SSH_LOG_PROTOCOL, "failed to allocate a new handle");
         sftp_reply_status(client_msg, SSH_FX_FAILURE,
                           "Failed to allocate new handle");
@@ -1091,6 +1090,7 @@ process_opendir(sftp_client_message client_msg)
 
     h = calloc(1, sizeof (struct sftp_handle));
     if (h == NULL) {
+        closedir(dir);
         SSH_LOG(SSH_LOG_PROTOCOL, "failed to allocate a new handle");
         sftp_reply_status(client_msg, SSH_FX_FAILURE,
                           "Failed to allocate new handle");
