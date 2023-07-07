@@ -55,8 +55,8 @@ static sftp_client_message
 sftp_make_client_message(sftp_session sftp, sftp_packet packet)
 {
     ssh_session session = sftp->session;
-    sftp_client_message msg;
-    ssh_buffer payload;
+    sftp_client_message msg = NULL;
+    ssh_buffer payload = NULL;
     int rc;
     int version;
 
@@ -73,6 +73,7 @@ sftp_make_client_message(sftp_session sftp, sftp_packet packet)
     /* take a copy of the whole packet */
     msg->complete_message = ssh_buffer_new();
     if (msg->complete_message == NULL) {
+        ssh_set_error_oom(session);
         goto error;
     }
 
@@ -84,7 +85,10 @@ sftp_make_client_message(sftp_session sftp, sftp_packet packet)
     }
 
     if (msg->type != SSH_FXP_INIT) {
-        ssh_buffer_get_u32(payload, &msg->id);
+        rc = ssh_buffer_get_u32(payload, &msg->id);
+        if (rc != sizeof(uint32_t)) {
+            goto error;
+        }
     }
 
     switch (msg->type) {
@@ -179,7 +183,7 @@ sftp_make_client_message(sftp_session sftp, sftp_packet packet)
             if (rc != SSH_OK) {
                 goto error;
             }
-            if(sftp->version > 3) {
+            if (sftp->version > 3) {
                 ssh_buffer_unpack(payload, "d", &msg->flags);
             }
             break;
@@ -233,14 +237,12 @@ sftp_make_client_message(sftp_session sftp, sftp_packet packet)
         default:
             ssh_set_error(sftp->session, SSH_FATAL,
                           "Received unhandled sftp message %d", msg->type);
-            sftp_client_message_free(msg);
-            return NULL;
+            goto error;
     }
 
     return msg;
 
 error:
-    ssh_set_error_oom(session);
     sftp_client_message_free(msg);
     return NULL;
 }
