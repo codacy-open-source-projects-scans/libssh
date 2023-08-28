@@ -1976,4 +1976,115 @@ char *ssh_strerror(int err_num, char *buf, size_t buflen)
 #endif /* defined(__linux__) && defined(__GLIBC__) && defined(_GNU_SOURCE) */
 }
 
+/**
+ * @brief Read the requested number of bytes from a local file.
+ *
+ * A call to read() may perform a short read even when sufficient data is
+ * present in the file. This function can be used to avoid such short reads.
+ *
+ * This function tries to read the requested number of bytes from the file
+ * until one of the following occurs :
+ *     - Requested number of bytes are read.
+ *     - EOF is encountered before reading the requested number of bytes.
+ *     - An error occurs.
+ *
+ * On encountering an error due to an interrupt, this function ignores that
+ * error and continues trying to read the data.
+ *
+ * @param[in] fd          The file descriptor of the local file to read from.
+ *
+ * @param[out] buf        Pointer to a buffer in which read data will be
+ *                        stored.
+ *
+ * @param[in] nbytes      Number of bytes to read.
+ *
+ * @returns               Number of bytes read on success,
+ *                        SSH_ERROR on error with errno set to indicate the
+ *                        error.
+ */
+ssize_t ssh_readn(int fd, void *buf, size_t nbytes)
+{
+    size_t total_bytes_read = 0;
+    ssize_t bytes_read;
+
+    if (fd < 0 || buf == NULL || nbytes == 0) {
+        errno = EINVAL;
+        return SSH_ERROR;
+    }
+
+    do {
+        bytes_read = read(fd,
+                          ((char *)buf) + total_bytes_read,
+                          nbytes - total_bytes_read);
+        if (bytes_read == -1) {
+            if (errno == EINTR) {
+                /* Ignoring errors due to signal interrupts */
+                continue;
+            }
+
+            return SSH_ERROR;
+        }
+
+        if (bytes_read == 0) {
+            /* EOF encountered on the local file before reading nbytes */
+            break;
+        }
+
+        total_bytes_read += (size_t)bytes_read;
+    } while (total_bytes_read < nbytes);
+
+    return total_bytes_read;
+}
+
+/**
+ * @brief Write the requested number of bytes to a local file.
+ *
+ * A call to write() may perform a short write on a local file. This function
+ * can be used to avoid short writes.
+ *
+ * This function tries to write the requested number of bytes until those many
+ * bytes are written or some error occurs.
+ *
+ * On encountering an error due to an interrupt, this function ignores that
+ * error and continues trying to write the data.
+ *
+ * @param[in] fd          The file descriptor of the local file to write to.
+ *
+ * @param[in] buf         Pointer to a buffer in which data to write is stored.
+ *
+ * @param[in] nbytes      Number of bytes to write.
+ *
+ * @returns               Number of bytes written on success,
+ *                        SSH_ERROR on error with errno set to indicate the
+ *                        error.
+ */
+ssize_t ssh_writen(int fd, const void *buf, size_t nbytes)
+{
+    size_t total_bytes_written = 0;
+    ssize_t bytes_written;
+
+    if (fd < 0 || buf == NULL || nbytes == 0) {
+        errno = EINVAL;
+        return SSH_ERROR;
+    }
+
+    do {
+        bytes_written = write(fd,
+                              ((const char *)buf) + total_bytes_written,
+                              nbytes - total_bytes_written);
+        if (bytes_written == -1) {
+            if(errno == EINTR) {
+                /* Ignoring errors due to signal interrupts */
+                continue;
+            }
+
+            return SSH_ERROR;
+        }
+
+        total_bytes_written += (size_t)bytes_written;
+    } while (total_bytes_written < nbytes);
+
+    return total_bytes_written;
+}
+
 /** @} */
