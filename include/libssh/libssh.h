@@ -295,7 +295,8 @@ enum ssh_keytypes_e{
 
 enum ssh_keycmp_e {
   SSH_KEY_CMP_PUBLIC = 0,
-  SSH_KEY_CMP_PRIVATE
+  SSH_KEY_CMP_PRIVATE = 1,
+  SSH_KEY_CMP_CERTIFICATE = 2,
 };
 
 #define SSH_ADDRSTRLEN 46
@@ -415,6 +416,7 @@ enum ssh_options_e {
   SSH_OPTIONS_IDENTITIES_ONLY,
   SSH_OPTIONS_CONTROL_MASTER,
   SSH_OPTIONS_CONTROL_PATH,
+  SSH_OPTIONS_CERTIFICATE,
 };
 
 enum {

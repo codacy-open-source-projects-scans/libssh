@@ -586,7 +586,7 @@ enum ssh_keytypes_e ssh_key_type_from_name(const char *name)
 }
 
 /**
- * @brief Get the pubic key type corresponding to a certificate type.
+ * @brief Get the public key type corresponding to a certificate type.
  *
  * @param[in] type   The certificate or public key type.
  *
@@ -664,7 +664,7 @@ int ssh_key_cmp(const ssh_key k1,
         return 1;
     }
 
-    if (k1->type != k2->type) {
+    if (ssh_key_type_plain(k1->type) != ssh_key_type_plain(k2->type)) {
         SSH_LOG(SSH_LOG_DEBUG, "key types don't match!");
         return 1;
     }
@@ -683,6 +683,22 @@ int ssh_key_cmp(const ssh_key k1,
                 ssh_string_len(k2->sk_application)) != 0) {
             return 1;
         }
+    }
+
+    if (what == SSH_KEY_CMP_CERTIFICATE) {
+        if (!is_cert_type(k1->type) ||
+            !is_cert_type(k2->type)) {
+            return 1;
+        }
+        if (k1->cert == NULL || k2->cert == NULL) {
+            return 1;
+        }
+        if (ssh_buffer_get_len(k1->cert) != ssh_buffer_get_len(k2->cert)) {
+            return 1;
+        }
+        return memcmp(ssh_buffer_get(k1->cert),
+                      ssh_buffer_get(k2->cert),
+                      ssh_buffer_get_len(k1->cert));
     }
 
     if (k1->type == SSH_KEYTYPE_ED25519 ||
@@ -1476,7 +1492,7 @@ static int pki_import_cert_buffer(ssh_buffer buffer,
 
     key->type = type;
     key->type_c = type_c;
-    key->cert = (void*) cert;
+    key->cert = cert;
 
     *pkey = key;
     return SSH_OK;
@@ -1852,7 +1868,18 @@ int ssh_pki_import_cert_blob(const ssh_string cert_blob,
  */
 int ssh_pki_import_cert_file(const char *filename, ssh_key *pkey)
 {
-    return ssh_pki_import_pubkey_file(filename, pkey);
+    int rc;
+
+    rc = ssh_pki_import_pubkey_file(filename, pkey);
+    if (rc == SSH_OK) {
+        /* check the key is a cert type. */
+        if (!is_cert_type((*pkey)->type)) {
+            SSH_KEY_FREE(*pkey);
+            return SSH_ERROR;
+        }
+    }
+
+    return rc;
 }
 
 /**
@@ -2135,7 +2162,7 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
  **/
 int ssh_pki_copy_cert_to_privkey(const ssh_key certkey, ssh_key privkey) {
   ssh_buffer cert_buffer;
-  int rc;
+  int rc, cmp;
 
   if (certkey == NULL || privkey == NULL) {
       return SSH_ERROR;
@@ -2147,6 +2174,12 @@ int ssh_pki_copy_cert_to_privkey(const ssh_key certkey, ssh_key privkey) {
 
   if (certkey->cert == NULL) {
       return SSH_ERROR;
+  }
+
+  /* make sure the public keys match */
+  cmp = ssh_key_cmp(certkey, privkey, SSH_KEY_CMP_PUBLIC);
+  if (cmp != 0) {
+    return SSH_ERROR;
   }
 
   cert_buffer = ssh_buffer_new();
