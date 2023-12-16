@@ -967,6 +967,9 @@ ssh_string pki_private_key_to_pem(const ssh_key key,
     pkey = NULL;
 
     if (rc != 1) {
+        SSH_LOG(SSH_LOG_WARNING,
+                "Failed to write private key: %s\n",
+                ERR_error_string(ERR_get_error(), NULL));
         goto err;
     }
 
@@ -1003,6 +1006,7 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
     EC_KEY *ecdsa = NULL;
 #endif /* OPENSSL_VERSION_NUMBER */
     uint8_t *ed25519 = NULL;
+    uint8_t *ed25519_pubkey = NULL;
     ssh_key key = NULL;
     enum ssh_keytypes_e type = SSH_KEYTYPE_UNKNOWN;
     EVP_PKEY *pkey = NULL;
@@ -1092,6 +1096,22 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
                     ERR_error_string(ERR_get_error(), NULL));
             goto fail;
         }
+
+        /* length matches the private key length */
+        ed25519_pubkey = malloc(ED25519_KEY_LEN);
+        if (ed25519_pubkey == NULL) {
+            SSH_LOG(SSH_LOG_TRACE, "Out of memory");
+            goto fail;
+        }
+
+        evp_rc = EVP_PKEY_get_raw_public_key(pkey, (uint8_t *)ed25519_pubkey,
+                                             &key_len);
+        if (evp_rc != 1) {
+            SSH_LOG(SSH_LOG_TRACE,
+                    "Failed to get ed25519 raw public key:  %s",
+                    ERR_error_string(ERR_get_error(), NULL));
+            goto fail;
+        }
         type = SSH_KEYTYPE_ED25519;
 
     }
@@ -1113,6 +1133,7 @@ ssh_key pki_private_key_from_base64(const char *b64_key,
     key->flags = SSH_KEY_FLAG_PRIVATE | SSH_KEY_FLAG_PUBLIC;
     key->key = pkey;
     key->ed25519_privkey = ed25519;
+    key->ed25519_pubkey = ed25519_pubkey;
 #ifdef HAVE_OPENSSL_ECC
     if (is_ecdsa_key_type(key->type)) {
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
@@ -1128,6 +1149,7 @@ fail:
     EVP_PKEY_free(pkey);
     ssh_key_free(key);
     SAFE_FREE(ed25519);
+    SAFE_FREE(ed25519_pubkey);
     return NULL;
 }
 
@@ -1135,12 +1157,17 @@ int pki_privkey_build_rsa(ssh_key key,
                           ssh_string n,
                           ssh_string e,
                           ssh_string d,
-                          UNUSED_PARAM(ssh_string iqmp),
+                          ssh_string iqmp,
                           ssh_string p,
                           ssh_string q)
 {
     int rc;
-    BIGNUM *be, *bn, *bd/*, *biqmp*/, *bp, *bq;
+    BIGNUM *be = NULL, *bn = NULL, *bd = NULL;
+    BIGNUM *biqmp = NULL, *bp = NULL, *bq = NULL;
+    BIGNUM *aux = NULL, *d_consttime = NULL;
+    BIGNUM *bdmq1 = NULL, *bdmp1 = NULL;
+    BN_CTX *ctx = NULL;
+
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
     OSSL_PARAM_BLD *param_bld = OSSL_PARAM_BLD_new();
     if (param_bld == NULL) {
@@ -1156,11 +1183,38 @@ int pki_privkey_build_rsa(ssh_key key,
     bn = ssh_make_string_bn(n);
     be = ssh_make_string_bn(e);
     bd = ssh_make_string_bn(d);
-    /*biqmp = ssh_make_string_bn(iqmp);*/
+    biqmp = ssh_make_string_bn(iqmp);
     bp = ssh_make_string_bn(p);
     bq = ssh_make_string_bn(q);
     if (be == NULL || bn == NULL || bd == NULL ||
         /*biqmp == NULL ||*/ bp == NULL || bq == NULL) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
+    /* Calculate remaining CRT parameters for OpenSSL to be happy
+     * taken from OpenSSH */
+    if ((ctx = BN_CTX_new()) == NULL) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+    if ((aux = BN_new()) == NULL ||
+        (bdmq1 = BN_new()) == NULL ||
+        (bdmp1 = BN_new()) == NULL) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+    if ((d_consttime = BN_dup(bd)) == NULL) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+    BN_set_flags(aux, BN_FLG_CONSTTIME);
+    BN_set_flags(d_consttime, BN_FLG_CONSTTIME);
+
+    if ((BN_sub(aux, bq, BN_value_one()) == 0) ||
+        (BN_mod(bdmq1, d_consttime, aux, ctx) == 0) ||
+        (BN_sub(aux, bp, BN_value_one()) == 0) ||
+        (BN_mod(bdmp1, d_consttime, aux, ctx) == 0)) {
         rc = SSH_ERROR;
         goto fail;
     }
@@ -1181,9 +1235,15 @@ int pki_privkey_build_rsa(ssh_key key,
     /* p, q, dmp1, dmq1 and iqmp may be NULL in private keys, but the RSA
      * operations are much faster when these values are available.
      * https://www.openssl.org/docs/man1.0.2/crypto/rsa.html
+     * And OpenSSL fails to export these keys to PEM if these are missing:
+     * https://github.com/openssl/openssl/issues/21826
      */
-    /* RSA_set0_crt_params(key->rsa, biqmp, NULL, NULL);
-    TODO calculate missing crt_params */
+    rc = RSA_set0_crt_params(key_rsa, bdmp1, bdmq1, biqmp);
+    if (rc == 0) {
+        goto fail;
+    }
+    bignum_safe_free(aux);
+    bignum_safe_free(d_consttime);
 
     key->key = EVP_PKEY_new();
     if (key->key == NULL) {
@@ -1217,20 +1277,41 @@ fail:
         goto fail;
     }
 
+    rc = OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_FACTOR1, bp);
+    if (rc != 1) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
+    rc = OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_FACTOR2, bq);
+    if (rc != 1) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
+    rc = OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_EXPONENT1, bdmp1);
+    if (rc != 1) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
+    rc = OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_EXPONENT2, bdmq1);
+    if (rc != 1) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
+    rc = OSSL_PARAM_BLD_push_BN(param_bld, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, biqmp);
+    if (rc != 1) {
+        rc = SSH_ERROR;
+        goto fail;
+    }
+
     rc = evp_build_pkey("RSA", param_bld, &(key->key), EVP_PKEY_KEYPAIR);
     if (rc != SSH_OK) {
-        rc = SSH_ERROR;
-        goto fail;
-    }
-
-    rc = EVP_PKEY_set_bn_param(key->key, OSSL_PKEY_PARAM_RSA_FACTOR1, bp);
-    if (rc != 1) {
-        rc = SSH_ERROR;
-        goto fail;
-    }
-
-    rc = EVP_PKEY_set_bn_param(key->key, OSSL_PKEY_PARAM_RSA_FACTOR2, bq);
-    if (rc != 1) {
+        SSH_LOG(SSH_LOG_WARNING,
+                "Failed to import private key: %s\n",
+                ERR_error_string(ERR_get_error(), NULL));
         rc = SSH_ERROR;
         goto fail;
     }
@@ -1242,7 +1323,13 @@ fail:
     bignum_safe_free(bd);
     bignum_safe_free(bp);
     bignum_safe_free(bq);
+    bignum_safe_free(biqmp);
 
+    bignum_safe_free(aux);
+    bignum_safe_free(d_consttime);
+    bignum_safe_free(bdmp1);
+    bignum_safe_free(bdmq1);
+    BN_CTX_free(ctx);
     return rc;
 #endif /* OPENSSL_VERSION_NUMBER */
 }
@@ -1316,7 +1403,7 @@ fail:
 #endif /* OPENSSL_VERSION_NUMBER */
 }
 
-ssh_string pki_publickey_to_blob(const ssh_key key)
+ssh_string pki_key_to_blob(const ssh_key key, enum ssh_key_e type)
 {
     ssh_buffer buffer;
     ssh_string type_s;
@@ -1326,10 +1413,13 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
     ssh_string p = NULL;
     ssh_string g = NULL;
     ssh_string q = NULL;
+    ssh_string d = NULL;
+    ssh_string iqmp = NULL;
     int rc;
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
     BIGNUM *bp = NULL, *bq = NULL, *bg = NULL, *bpub_key = NULL,
-           *bn = NULL, *be = NULL;
+           *bn = NULL, *be = NULL,
+           *bd = NULL, *biqmp = NULL;
     OSSL_PARAM *params = NULL;
 #endif /* OPENSSL_VERSION_NUMBER */
 
@@ -1364,7 +1454,7 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
         case SSH_KEYTYPE_RSA:
         case SSH_KEYTYPE_RSA1: {
 #if OPENSSL_VERSION_NUMBER < 0x30000000L
-            const BIGNUM *be, *bn;
+            const BIGNUM *be = NULL, *bn = NULL;
             const RSA *key_rsa = EVP_PKEY_get0_RSA(key->key);
             RSA_get0_key(key_rsa, &bn, &be, NULL);
 #else
@@ -1402,13 +1492,133 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
                 goto fail;
             }
 
-            if (ssh_buffer_add_ssh_string(buffer, e) < 0) {
-                goto fail;
-            }
-            if (ssh_buffer_add_ssh_string(buffer, n) < 0) {
-                goto fail;
-            }
+            if (type == SSH_KEY_PUBLIC) {
+                /* The N and E parts are swapped in the public key export ! */
+                rc = ssh_buffer_add_ssh_string(buffer, e);
+                if (rc < 0) {
+                    goto fail;
+                }
+                rc = ssh_buffer_add_ssh_string(buffer, n);
+                if (rc < 0) {
+                    goto fail;
+                }
+            } else if (type == SSH_KEY_PRIVATE) {
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+                const BIGNUM *bd, *biqmp, *bp, *bq;
+                RSA_get0_key(key_rsa, NULL, NULL, &bd);
+                RSA_get0_factors(key_rsa, &bp, &bq);
+                RSA_get0_crt_params(key_rsa, NULL, NULL, &biqmp);
+#else
+                rc = EVP_PKEY_todata(key->key, EVP_PKEY_KEYPAIR, &params);
+                if (rc != 1) {
+                    goto fail;
+                }
 
+                out_param = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_D);
+                if (out_param == NULL) {
+                    SSH_LOG(SSH_LOG_TRACE, "RSA: No param D has been found");
+                    goto fail;
+                }
+                rc = OSSL_PARAM_get_BN(out_param, &bd);
+                if (rc != 1) {
+                    goto fail;
+                }
+
+                out_param = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_FACTOR1);
+                if (out_param == NULL) {
+                    SSH_LOG(SSH_LOG_TRACE, "RSA: No param P has been found");
+                    goto fail;
+                }
+                rc = OSSL_PARAM_get_BN(out_param, &bp);
+                if (rc != 1) {
+                    goto fail;
+                }
+
+                out_param = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_FACTOR2);
+                if (out_param == NULL) {
+                    SSH_LOG(SSH_LOG_TRACE, "RSA: No param Q has been found");
+                    goto fail;
+                }
+                rc = OSSL_PARAM_get_BN(out_param, &bq);
+                if (rc != 1) {
+                    goto fail;
+                }
+
+                out_param = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_COEFFICIENT1);
+                if (out_param == NULL) {
+                    SSH_LOG(SSH_LOG_TRACE, "RSA: No param IQMP has been found");
+                    goto fail;
+                }
+                rc = OSSL_PARAM_get_BN(out_param, &biqmp);
+                if (rc != 1) {
+                    goto fail;
+                }
+#endif /* OPENSSL_VERSION_NUMBER */
+                rc = ssh_buffer_add_ssh_string(buffer, n);
+                if (rc < 0) {
+                    goto fail;
+                }
+                rc = ssh_buffer_add_ssh_string(buffer, e);
+                if (rc < 0) {
+                    goto fail;
+                }
+
+                d = ssh_make_bignum_string((BIGNUM *)bd);
+                if (d == NULL) {
+                    goto fail;
+                }
+
+                iqmp = ssh_make_bignum_string((BIGNUM *)biqmp);
+                if (iqmp == NULL) {
+                    goto fail;
+                }
+
+                p = ssh_make_bignum_string((BIGNUM *)bp);
+                if (p == NULL) {
+                    goto fail;
+                }
+
+                q = ssh_make_bignum_string((BIGNUM *)bq);
+                if (q == NULL) {
+                    goto fail;
+                }
+
+                rc = ssh_buffer_add_ssh_string(buffer, d);
+                if (rc < 0) {
+                    goto fail;
+                }
+                rc = ssh_buffer_add_ssh_string(buffer, iqmp);
+                if (rc < 0) {
+                    goto fail;
+                }
+                rc = ssh_buffer_add_ssh_string(buffer, p);
+                if (rc < 0) {
+                    goto fail;
+                }
+                rc = ssh_buffer_add_ssh_string(buffer, q);
+                if (rc < 0) {
+                    goto fail;
+                }
+
+                ssh_string_burn(d);
+                SSH_STRING_FREE(d);
+                d = NULL;
+                ssh_string_burn(iqmp);
+                SSH_STRING_FREE(iqmp);
+                iqmp = NULL;
+                ssh_string_burn(p);
+                SSH_STRING_FREE(p);
+                p = NULL;
+                ssh_string_burn(q);
+                SSH_STRING_FREE(q);
+                q = NULL;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+                bignum_safe_free(bd);
+                bignum_safe_free(biqmp);
+                bignum_safe_free(bp);
+                bignum_safe_free(bq);
+#endif /* OPENSSL_VERSION_NUMBER */
+            }
             ssh_string_burn(e);
             SSH_STRING_FREE(e);
             e = NULL;
@@ -1424,13 +1634,23 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
         }
         case SSH_KEYTYPE_ED25519:
         case SSH_KEYTYPE_SK_ED25519:
-            rc = pki_ed25519_public_key_to_blob(buffer, key);
-            if (rc == SSH_ERROR){
-                goto fail;
-            }
-            if (key->type == SSH_KEYTYPE_SK_ED25519 &&
-                ssh_buffer_add_ssh_string(buffer, key->sk_application) < 0) {
-                goto fail;
+            if (type == SSH_KEY_PUBLIC) {
+                rc = pki_ed25519_public_key_to_blob(buffer, key);
+                if (rc == SSH_ERROR){
+                    goto fail;
+                }
+                /* public key can contain certificate sk information */
+                if (key->type == SSH_KEYTYPE_SK_ED25519) {
+                    rc = ssh_buffer_add_ssh_string(buffer, key->sk_application);
+                    if (rc < 0) {
+                        goto fail;
+                    }
+                }
+            } else {
+                rc = pki_ed25519_private_key_to_blob(buffer, key);
+                if (rc == SSH_ERROR){
+                    goto fail;
+                }
             }
             break;
         case SSH_KEYTYPE_ECDSA_P256:
@@ -1448,6 +1668,7 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
 #else
                 const EC_GROUP *group = NULL;
                 const EC_POINT *point = NULL;
+                const BIGNUM *exp = NULL;
                 EC_KEY *ec = NULL;
 #endif /* OPENSSL_VERSION_NUMBER */
 
@@ -1532,15 +1753,52 @@ ssh_string pki_publickey_to_blob(const ssh_key key)
                 ssh_string_burn(e);
                 SSH_STRING_FREE(e);
                 e = NULL;
+                if (type == SSH_KEY_PRIVATE) {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+                    rc = EVP_PKEY_todata(key->key, EVP_PKEY_KEYPAIR, &params);
+                    if (rc < 0) {
+                        goto fail;
+                    }
+
+                    locate_param = OSSL_PARAM_locate(params, OSSL_PKEY_PARAM_PRIV_KEY);
+                    rc = OSSL_PARAM_get_BN(locate_param, &bd);
+                    if (rc != 1) {
+                        goto fail;
+                    }
+                    d = ssh_make_bignum_string((BIGNUM *)bd);
+                    if (d == NULL) {
+                        goto fail;
+                    }
+                    if (ssh_buffer_add_ssh_string(buffer, d) < 0) {
+                        goto fail;
+                    }
+#else
+                    exp = EC_KEY_get0_private_key(ec);
+                    if (exp == NULL) {
+                        goto fail;
+                    }
+                    d = ssh_make_bignum_string((BIGNUM *)exp);
+                    if (d == NULL) {
+                        goto fail;
+                    }
+                    rc = ssh_buffer_add_ssh_string(buffer, d);
+                    if (rc < 0) {
+                        goto fail;
+                    }
+#endif /* OPENSSL_VERSION_NUMBER */
+                    ssh_string_burn(d);
+                    SSH_STRING_FREE(d);
+                    d = NULL;
+                } else if (key->type == SSH_KEYTYPE_SK_ECDSA) {
+                    /* public key can contain certificate sk information */
+                    rc = ssh_buffer_add_ssh_string(buffer, key->sk_application);
+                    if (rc < 0) {
+                        goto fail;
+                    }
+                }
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
                 OSSL_PARAM_free(params);
 #endif /* OPENSSL_VERSION_NUMBER */
-
-                if (key->type == SSH_KEYTYPE_SK_ECDSA &&
-                    ssh_buffer_add_ssh_string(buffer, key->sk_application) < 0) {
-                    goto fail;
-                }
-
                 break;
             }
 #endif /* HAVE_OPENSSL_ECC */
@@ -1576,6 +1834,10 @@ fail:
     SSH_STRING_FREE(q);
     ssh_string_burn(n);
     SSH_STRING_FREE(n);
+    ssh_string_burn(d);
+    SSH_STRING_FREE(d);
+    ssh_string_burn(iqmp);
+    SSH_STRING_FREE(iqmp);
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
     bignum_safe_free(bp);
     bignum_safe_free(bq);
@@ -1583,6 +1845,8 @@ fail:
     bignum_safe_free(bpub_key);
     bignum_safe_free(bn);
     bignum_safe_free(be);
+    bignum_safe_free(bd);
+    bignum_safe_free(biqmp);
     OSSL_PARAM_free(params);
 #endif /* OPENSSL_VERSION_NUMBER */
 
