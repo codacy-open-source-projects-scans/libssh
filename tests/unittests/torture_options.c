@@ -2049,7 +2049,8 @@ static int sshbind_teardown(void **state)
     return 0;
 }
 
-static void torture_bind_options_import_key(void **state)
+static void
+torture_bind_options_import_key(void **state)
 {
     struct bind_st *test_state;
     ssh_bind bind;
@@ -2071,6 +2072,15 @@ static void torture_bind_options_import_key(void **state)
     assert_int_equal(rc, -1);
     SSH_KEY_FREE(key);
 
+    /* set ed25519 key */
+    base64_key = torture_get_openssh_testkey(SSH_KEYTYPE_ED25519, 0);
+    rc = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL, &key);
+    assert_int_equal(rc, SSH_OK);
+    assert_non_null(key);
+
+    rc = ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY, key);
+    assert_int_equal(rc, 0);
+
     /* set rsa key */
     base64_key = torture_get_testkey(SSH_KEYTYPE_RSA, 0);
     rc = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL, &key);
@@ -2087,6 +2097,51 @@ static void torture_bind_options_import_key(void **state)
     assert_non_null(key);
 
     rc = ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY, key);
+    assert_int_equal(rc, 0);
+#endif
+}
+
+static void
+torture_bind_options_import_key_str(void **state)
+{
+    struct bind_st *test_state = NULL;
+    ssh_bind bind = NULL;
+    int rc;
+    const char *base64_key = "";
+
+    assert_non_null(state);
+    test_state = *((struct bind_st **)state);
+    assert_non_null(test_state);
+    assert_non_null(test_state->bind);
+    bind = test_state->bind;
+
+    /* set null */
+    rc = ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, NULL);
+    assert_int_equal(rc, -1);
+    /* set invalid key */
+    rc =
+        ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, base64_key);
+    assert_int_equal(rc, -1);
+
+    /* set ed25519 key */
+    base64_key = torture_get_openssh_testkey(SSH_KEYTYPE_ED25519, 0);
+
+    rc =
+        ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, base64_key);
+    assert_int_equal(rc, 0);
+
+    /* set rsa key */
+    base64_key = torture_get_testkey(SSH_KEYTYPE_RSA, 0);
+
+    rc =
+        ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, base64_key);
+    assert_int_equal(rc, 0);
+#ifdef HAVE_ECC
+    /* set ecdsa key */
+    base64_key = torture_get_testkey(SSH_KEYTYPE_ECDSA_P521, 0);
+
+    rc =
+        ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, base64_key);
     assert_int_equal(rc, 0);
 #endif
 }
@@ -2694,95 +2749,185 @@ static void torture_bind_options_set_hostkey_algorithms(void **state)
 
 #endif /* WITH_SERVER */
 
-
-int torture_run_tests(void)
+int
+torture_run_tests(void)
 {
     int rc;
     struct CMUnitTest tests[] = {
-        cmocka_unit_test_setup_teardown(torture_options_set_host, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_host, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_port, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_port, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_fd, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_user, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_user, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_identity, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_identity, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_global_knownhosts, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_global_knownhosts, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_knownhosts, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_knownhosts, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_proxycommand, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_control_master, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_control_path, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_ciphers, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_ciphers, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_key_exchange, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_key_exchange, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_hostkey, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_hostkey, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_pubkey_accepted_types, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_pubkey_accepted_types, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_macs, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_macs, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_compression, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_get_compression, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_host,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_host,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_port,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_port,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_fd,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_user,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_user,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_identity,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_identity,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_global_knownhosts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_global_knownhosts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_knownhosts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_knownhosts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_proxycommand,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_control_master,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_control_path,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_ciphers,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_ciphers,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_key_exchange,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_key_exchange,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_hostkey,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_hostkey,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_options_set_pubkey_accepted_types,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_options_get_pubkey_accepted_types,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_macs,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_macs,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_compression,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_compression,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_copy, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_config_host, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_config_host,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_config_match,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_config_match_multi,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_getopt,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_plus_sign,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_minus_sign,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_caret_sign,
-                                        setup, teardown),
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_apply, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_options_set_verbosity, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_verbosity,
+                                        setup,
+                                        teardown),
     };
 
 #ifdef WITH_SERVER
     struct CMUnitTest sshbind_tests[] = {
         cmocka_unit_test_setup_teardown(torture_bind_options_import_key,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
+        cmocka_unit_test_setup_teardown(torture_bind_options_import_key_str,
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_hostkey,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_bindaddr,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_bindport,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_bindport_str,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_log_verbosity,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_log_verbosity_str,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_rsakey,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
 #ifdef HAVE_ECC
         cmocka_unit_test_setup_teardown(torture_bind_options_ecdsakey,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
 #endif
         cmocka_unit_test_setup_teardown(torture_bind_options_banner,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_set_ciphers,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_set_key_exchange,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_set_macs,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_parse_config,
-                sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
         cmocka_unit_test_setup_teardown(torture_bind_options_config_dir,
-                sshbind_setup, sshbind_teardown),
-        cmocka_unit_test_setup_teardown(torture_bind_options_set_pubkey_accepted_key_types,
-                                        sshbind_setup, sshbind_teardown),
-        cmocka_unit_test_setup_teardown(torture_bind_options_set_hostkey_algorithms,
-                                        sshbind_setup, sshbind_teardown),
+                                        sshbind_setup,
+                                        sshbind_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_bind_options_set_pubkey_accepted_key_types,
+            sshbind_setup,
+            sshbind_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_bind_options_set_hostkey_algorithms,
+            sshbind_setup,
+            sshbind_teardown),
     };
 #endif /* WITH_SERVER */
 
