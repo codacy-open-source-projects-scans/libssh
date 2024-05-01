@@ -1893,6 +1893,10 @@ int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr)
     sftp_status_message status = NULL;
     int rc;
 
+    if (sftp == NULL || file == NULL || attr == NULL) {
+        return -1;
+    }
+
     buffer = ssh_buffer_new();
     if (buffer == NULL) {
         ssh_set_error_oom(sftp->session);
@@ -1960,6 +1964,95 @@ int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr)
     } else {
         ssh_set_error(sftp->session, SSH_FATAL,
                 "Received message %d when attempting to set stats", msg->packet_type);
+        sftp_message_free(msg);
+        sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
+    }
+
+    return -1;
+}
+
+int
+sftp_lsetstat(sftp_session sftp, const char *file, sftp_attributes attr)
+{
+    uint32_t id;
+    ssh_buffer buffer = NULL;
+    sftp_message msg = NULL;
+    sftp_status_message status = NULL;
+    const char *extension_name = "lsetstat@openssh.com";
+    int rc;
+
+    if (sftp == NULL || file == NULL || attr == NULL) {
+        return -1;
+    }
+
+    buffer = ssh_buffer_new();
+    if (buffer == NULL) {
+        ssh_set_error_oom(sftp->session);
+        sftp_set_error(sftp, SSH_FX_FAILURE);
+        return -1;
+    }
+
+    id = sftp_get_new_id(sftp);
+
+    rc = ssh_buffer_pack(buffer, "dss", id, extension_name, file);
+    if (rc != SSH_OK) {
+        ssh_set_error_oom(sftp->session);
+        SSH_BUFFER_FREE(buffer);
+        sftp_set_error(sftp, SSH_FX_FAILURE);
+        return -1;
+    }
+
+    rc = buffer_add_attributes(buffer, attr);
+    if (rc != 0) {
+        ssh_set_error_oom(sftp->session);
+        SSH_BUFFER_FREE(buffer);
+        sftp_set_error(sftp, SSH_FX_FAILURE);
+        return -1;
+    }
+
+    rc = sftp_packet_write(sftp, SSH_FXP_EXTENDED, buffer);
+    SSH_BUFFER_FREE(buffer);
+    if (rc < 0) {
+        return -1;
+    }
+
+    while (msg == NULL) {
+        if (sftp_read_and_dispatch(sftp) < 0) {
+            return -1;
+        }
+        msg = sftp_dequeue(sftp, id);
+    }
+
+    /* By specification, this command only returns SSH_FXP_STATUS */
+    if (msg->packet_type == SSH_FXP_STATUS) {
+        status = parse_status_msg(msg);
+        sftp_message_free(msg);
+        if (status == NULL) {
+            return -1;
+        }
+        sftp_set_error(sftp, status->status);
+        switch (status->status) {
+        case SSH_FX_OK:
+            status_msg_free(status);
+            return 0;
+        default:
+            break;
+        }
+        /*
+         * The status should be SSH_FX_OK if the command was successful, if it
+         * didn't, then there was an error
+         */
+        ssh_set_error(sftp->session,
+                      SSH_REQUEST_DENIED,
+                      "SFTP server: %s",
+                      status->errormsg);
+        status_msg_free(status);
+        return -1;
+    } else {
+        ssh_set_error(sftp->session,
+                      SSH_FATAL,
+                      "Received message %d when attempting to lsetstat",
+                      msg->packet_type);
         sftp_message_free(msg);
         sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
     }
@@ -3093,6 +3186,133 @@ char *sftp_expand_path(sftp_session sftp, const char *path)
         ssh_set_error(sftp->session, SSH_FATAL,
                       "Received message %d when attempting to expand path",
                       msg->packet_type);
+        sftp_message_free(msg);
+        sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
+    }
+
+    return NULL;
+}
+
+char *
+sftp_home_directory(sftp_session sftp, const char *username)
+{
+    sftp_status_message status = NULL;
+    sftp_message msg = NULL;
+    ssh_buffer buffer = NULL;
+    uint32_t id;
+    int rc;
+
+    if (sftp == NULL) {
+        return NULL;
+    }
+
+    buffer = ssh_buffer_new();
+    if (buffer == NULL) {
+        ssh_set_error_oom(sftp->session);
+        sftp_set_error(sftp, SSH_FX_FAILURE);
+        return NULL;
+    }
+
+    id = sftp_get_new_id(sftp);
+
+    rc = ssh_buffer_pack(buffer,
+                         "dss",
+                         id,
+                         "home-directory",
+                         username ? username : "");
+    if (rc != SSH_OK) {
+        ssh_set_error_oom(sftp->session);
+        SSH_BUFFER_FREE(buffer);
+        sftp_set_error(sftp, SSH_FX_FAILURE);
+        return NULL;
+    }
+
+    rc = sftp_packet_write(sftp, SSH_FXP_EXTENDED, buffer);
+    SSH_BUFFER_FREE(buffer);
+    if (rc < 0) {
+        return NULL;
+    }
+
+    while (msg == NULL) {
+        rc = sftp_read_and_dispatch(sftp);
+        if (rc < 0) {
+            return NULL;
+        }
+        msg = sftp_dequeue(sftp, id);
+    }
+
+    if (msg->packet_type == SSH_FXP_NAME) {
+        uint32_t count = 0;
+        char *homepath = NULL;
+        char *longpath = NULL;
+        sftp_attributes attr = NULL;
+
+        rc = ssh_buffer_unpack(msg->payload, "ds", &count, &homepath);
+        if (rc != SSH_OK) {
+            ssh_set_error(sftp->session,
+                          SSH_ERROR,
+                          "Failed to query user home directory");
+            sftp_set_error(sftp, SSH_FX_FAILURE);
+            return NULL;
+        }
+        /*
+          for SFTP version > 3, longname field in SSH_FXP_NAME is omitted.
+        */
+        if (sftp->version <= 3) {
+            rc = ssh_buffer_unpack(msg->payload, "s", &longpath);
+            if (rc != SSH_OK) {
+                ssh_set_error(sftp->session,
+                              SSH_ERROR,
+                              "Failed to extract longname from payload");
+                sftp_set_error(sftp, SSH_FX_FAILURE);
+                return NULL;
+            }
+        }
+        attr = sftp_parse_attr(sftp, msg->payload, 0);
+        if (attr == NULL) {
+            ssh_set_error(sftp->session,
+                          SSH_FATAL,
+                          "Couldn't parse the SFTP attributes");
+            return NULL;
+        }
+        sftp_message_free(msg);
+
+        if (count != 1) {
+            if (count > 1) {
+                ssh_set_error(sftp->session,
+                              SSH_ERROR,
+                              "Multiple results returned");
+            } else {
+                ssh_set_error(sftp->session, SSH_ERROR, "No result returned");
+            }
+            sftp_set_error(sftp, SSH_FX_FAILURE);
+            return NULL;
+        }
+
+        if (longpath) {
+            free(longpath);
+        }
+        sftp_attributes_free(attr);
+        return homepath;
+    } else if (msg->packet_type == SSH_FXP_STATUS) {
+        status = parse_status_msg(msg);
+        sftp_message_free(msg);
+        if (status == NULL) {
+            return NULL;
+        }
+
+        sftp_set_error(sftp, status->status);
+        ssh_set_error(sftp->session,
+                      SSH_REQUEST_DENIED,
+                      "SFTP server: %s",
+                      status->errormsg);
+        status_msg_free(status);
+    } else {
+        ssh_set_error(
+            sftp->session,
+            SSH_FATAL,
+            "Received message %d when attempting to query user home directory",
+            msg->packet_type);
         sftp_message_free(msg);
         sftp_set_error(sftp, SSH_FX_BAD_MESSAGE);
     }

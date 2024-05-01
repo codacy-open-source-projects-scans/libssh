@@ -949,6 +949,29 @@ LIBSSH_API int sftp_rename(sftp_session sftp, const char *original, const  char 
 LIBSSH_API int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr);
 
 /**
+ * @brief This request is like setstat (excluding mode and size) but sets file
+ * attributes on symlinks themselves.
+ *
+ * Note, that this function can only set time values using 32 bit values due to
+ * the restrictions in the SFTP protocol version 3 implemented by libssh.
+ * The support for 64 bit time values was introduced in SFTP version 5, which is
+ * not implemented by libssh nor any major SFTP servers.
+ *
+ * @param sftp          The sftp session handle.
+ *
+ * @param file          The symbolic link which attributes should be changed.
+ *
+ * @param attr          The file attributes structure with the attributes set
+ *                      which should be changed.
+ *
+ * @return              0 on success, < 0 on error with ssh and sftp error set.
+ *
+ * @see sftp_get_error()
+ */
+LIBSSH_API int
+sftp_lsetstat(sftp_session sftp, const char *file, sftp_attributes attr);
+
+/**
  * @brief Change the file owner and group
  *
  * @param sftp          The sftp session handle.
@@ -1143,6 +1166,27 @@ LIBSSH_API int sftp_server_version(sftp_session sftp);
  *                      using ssh_string_free_char().
  */
 LIBSSH_API char *sftp_expand_path(sftp_session sftp, const char *path);
+
+/**
+ * @brief Get the specified user's home directory
+ *
+ * This calls the "home-directory" extension. You should check if the extension
+ * is supported using:
+ *
+ * @code
+ * int supported  = sftp_extension_supported(sftp, "home-directory", "1");
+ * @endcode
+ *
+ * @param sftp          The sftp session handle.
+ *
+ * @param username      username of the user whose home directory is requested.
+ *
+ * @return              On success, a newly allocated string containing the
+ *                      absolute real-path of the home directory of the user.
+ *                      NULL on error. The caller needs to free the memory
+ *                      using ssh_string_free_char().
+ */
+LIBSSH_API char *sftp_home_directory(sftp_session sftp, const char *username);
 
 #ifdef WITH_SERVER
 /**

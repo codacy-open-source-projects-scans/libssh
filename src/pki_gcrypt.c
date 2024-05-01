@@ -153,7 +153,7 @@ static ssh_string asn1_get_bit_string(ssh_buffer buffer)
     ssh_string str;
     unsigned char type;
     uint32_t size;
-    unsigned char unused, last, *p;
+    unsigned char unused, last, *p = NULL;
     uint32_t len;
 
     len = ssh_buffer_get_data(buffer, &type, 1);
@@ -412,10 +412,10 @@ static ssh_buffer privatekey_string_to_buffer(const char *pkey, int type,
                 ssh_auth_callback cb, void *userdata, const char *desc) {
     ssh_buffer buffer = NULL;
     ssh_buffer out = NULL;
-    const char *p;
+    const char *p = NULL;
     unsigned char *iv = NULL;
-    const char *header_begin;
-    const char *header_end;
+    const char *header_begin = NULL;
+    const char *header_end = NULL;
     unsigned int header_begin_size;
     unsigned int header_end_size;
     unsigned int key_len = 0;
@@ -548,97 +548,116 @@ static ssh_buffer privatekey_string_to_buffer(const char *pkey, int type,
     return out;
 }
 
-static int b64decode_rsa_privatekey(const char *pkey, gcry_sexp_t *r,
-    ssh_auth_callback cb, void *userdata, const char *desc) {
-  const unsigned char *data;
-  ssh_string n = NULL;
-  ssh_string e = NULL;
-  ssh_string d = NULL;
-  ssh_string p = NULL;
-  ssh_string q = NULL;
-  ssh_string unused1 = NULL;
-  ssh_string unused2 = NULL;
-  ssh_string u = NULL;
-  ssh_string v = NULL;
-  ssh_buffer buffer = NULL;
-  int rc = 1;
+static int
+b64decode_rsa_privatekey(const char *pkey,
+                         gcry_sexp_t *r,
+                         ssh_auth_callback cb,
+                         void *userdata,
+                         const char *desc)
+{
+    const unsigned char *data = NULL;
+    ssh_string n = NULL;
+    ssh_string e = NULL;
+    ssh_string d = NULL;
+    ssh_string p = NULL;
+    ssh_string q = NULL;
+    ssh_string unused1 = NULL;
+    ssh_string unused2 = NULL;
+    ssh_string u = NULL;
+    ssh_string v = NULL;
+    ssh_buffer buffer = NULL;
+    int rc = 1;
+    gcry_error_t rv = 0;
 
-  buffer = privatekey_string_to_buffer(pkey, SSH_KEYTYPE_RSA, cb, userdata, desc);
-  if (buffer == NULL) {
-    return 0;
-  }
+    buffer = privatekey_string_to_buffer(pkey,
+                                         SSH_KEYTYPE_RSA,
+                                         cb,
+                                         userdata,
+                                         desc);
+    if (buffer == NULL) {
+        return 0;
+    }
 
-  if (!asn1_check_sequence(buffer)) {
+    if (!asn1_check_sequence(buffer)) {
+        SSH_BUFFER_FREE(buffer);
+        return 0;
+    }
+
+    v = asn1_get_int(buffer);
+    if (v == NULL) {
+        SSH_BUFFER_FREE(buffer);
+        return 0;
+    }
+
+    data = ssh_string_data(v);
+    if (ssh_string_len(v) != 1 || data[0] != 0) {
+        SSH_STRING_FREE(v);
+        SSH_BUFFER_FREE(buffer);
+        return 0;
+    }
+
+    n = asn1_get_int(buffer);
+    e = asn1_get_int(buffer);
+    d = asn1_get_int(buffer);
+    q = asn1_get_int(buffer);
+    p = asn1_get_int(buffer);
+    unused1 = asn1_get_int(buffer);
+    unused2 = asn1_get_int(buffer);
+    u = asn1_get_int(buffer);
+
     SSH_BUFFER_FREE(buffer);
-    return 0;
-  }
 
-  v = asn1_get_int(buffer);
-  if (v == NULL) {
-    SSH_BUFFER_FREE(buffer);
-    return 0;
-  }
+    if (n == NULL || e == NULL || d == NULL || p == NULL || q == NULL ||
+        unused1 == NULL || unused2 == NULL || u == NULL) {
+        rc = 0;
+        goto error;
+    }
 
-  data = ssh_string_data(v);
-  if (ssh_string_len(v) != 1 || data[0] != 0) {
-    SSH_STRING_FREE(v);
-    SSH_BUFFER_FREE(buffer);
-    return 0;
-  }
-
-  n = asn1_get_int(buffer);
-  e = asn1_get_int(buffer);
-  d = asn1_get_int(buffer);
-  q = asn1_get_int(buffer);
-  p = asn1_get_int(buffer);
-  unused1 = asn1_get_int(buffer);
-  unused2 = asn1_get_int(buffer);
-  u = asn1_get_int(buffer);
-
-  SSH_BUFFER_FREE(buffer);
-
-  if (n == NULL || e == NULL || d == NULL || p == NULL || q == NULL ||
-      unused1 == NULL || unused2 == NULL|| u == NULL) {
-    rc = 0;
-    goto error;
-  }
-
-  if (gcry_sexp_build(r, NULL,
-      "(private-key(rsa(n %b)(e %b)(d %b)(p %b)(q %b)(u %b)))",
-      ssh_string_len(n), ssh_string_data(n),
-      ssh_string_len(e), ssh_string_data(e),
-      ssh_string_len(d), ssh_string_data(d),
-      ssh_string_len(p), ssh_string_data(p),
-      ssh_string_len(q), ssh_string_data(q),
-      ssh_string_len(u), ssh_string_data(u))) {
-    rc = 0;
-  }
+    rv = gcry_sexp_build(
+        r,
+        NULL,
+        "(private-key(rsa(n %b)(e %b)(d %b)(p %b)(q %b)(u %b)))",
+        ssh_string_len(n),
+        ssh_string_data(n),
+        ssh_string_len(e),
+        ssh_string_data(e),
+        ssh_string_len(d),
+        ssh_string_data(d),
+        ssh_string_len(p),
+        ssh_string_data(p),
+        ssh_string_len(q),
+        ssh_string_data(q),
+        ssh_string_len(u),
+        ssh_string_data(u));
+    if (rv) {
+        rc = 0;
+    }
 
 error:
-  ssh_string_burn(n);
-  SSH_STRING_FREE(n);
-  ssh_string_burn(e);
-  SSH_STRING_FREE(e);
-  ssh_string_burn(d);
-  SSH_STRING_FREE(d);
-  ssh_string_burn(p);
-  SSH_STRING_FREE(p);
-  ssh_string_burn(q);
-  SSH_STRING_FREE(q);
-  SSH_STRING_FREE(unused1);
-  SSH_STRING_FREE(unused2);
-  ssh_string_burn(u);
-  SSH_STRING_FREE(u);
-  SSH_STRING_FREE(v);
+    ssh_string_burn(n);
+    SSH_STRING_FREE(n);
+    ssh_string_burn(e);
+    SSH_STRING_FREE(e);
+    ssh_string_burn(d);
+    SSH_STRING_FREE(d);
+    ssh_string_burn(p);
+    SSH_STRING_FREE(p);
+    ssh_string_burn(q);
+    SSH_STRING_FREE(q);
+    SSH_STRING_FREE(unused1);
+    SSH_STRING_FREE(unused2);
+    ssh_string_burn(u);
+    SSH_STRING_FREE(u);
+    SSH_STRING_FREE(v);
 
-  return rc;
+    return rc;
 }
 
 #ifdef HAVE_GCRYPT_ECC
 static int pki_key_ecdsa_to_nid(gcry_sexp_t k)
 {
-    gcry_sexp_t sexp;
-    const char *tmp;
+    gcry_sexp_t sexp = NULL;
+    const char *tmp = NULL;
     size_t size;
 
     sexp = gcry_sexp_find_token(k, "curve", 0);
@@ -786,7 +805,7 @@ static int b64decode_ecdsa_privatekey(const char *pkey, gcry_sexp_t *r,
                                       void *userdata,
                                       const char *desc)
 {
-    const unsigned char *data;
+    const unsigned char *data = NULL;
     ssh_buffer buffer = NULL;
     gcry_error_t err = 0;
     ssh_string v = NULL;
@@ -1070,7 +1089,7 @@ int pki_pubkey_build_ecdsa(ssh_key key, int nid, ssh_string e)
 
 ssh_key pki_key_dup(const ssh_key key, int demote)
 {
-    ssh_key new;
+    ssh_key new = NULL;
     gcry_error_t err = 0;
     int rc;
 
@@ -1200,16 +1219,20 @@ ssh_key pki_key_dup(const ssh_key key, int demote)
     return new;
 }
 
-static int pki_key_generate(ssh_key key, int parameter, const char *type_s, int type){
-    gcry_sexp_t params;
+static int
+pki_key_generate(ssh_key key, int parameter, const char *type_s, int type)
+{
+    gcry_sexp_t params = NULL;
     int rc;
     rc = gcry_sexp_build(&params,
-            NULL,
-            "(genkey(%s(nbits %d)(transient-key)))",
-            type_s,
-            parameter);
-    if (rc != 0)
+                         NULL,
+                         "(genkey(%s(nbits %d)(transient-key)))",
+                         type_s,
+                         parameter);
+    if (rc != 0) {
         return SSH_ERROR;
+    }
+
     switch (type) {
     case SSH_KEYTYPE_RSA:
         rc = gcry_pk_genkey(&key->rsa, params);
@@ -1228,7 +1251,9 @@ static int pki_key_generate(ssh_key key, int parameter, const char *type_s, int 
     return SSH_OK;
 }
 
-int pki_key_generate_rsa(ssh_key key, int parameter){
+int
+pki_key_generate_rsa(ssh_key key, int parameter)
+{
     return pki_key_generate(key, parameter, "rsa", SSH_KEYTYPE_RSA);
 }
 
@@ -1259,9 +1284,9 @@ static int _bignum_cmp(const gcry_sexp_t s1,
                        const gcry_sexp_t s2,
                        const char *what)
 {
-    gcry_sexp_t sexp;
-    bignum b1;
-    bignum b2;
+    gcry_sexp_t sexp = NULL;
+    bignum b1 = NULL;
+    bignum b2 = NULL;
     int result;
 
     sexp = gcry_sexp_find_token(s1, what, 0);
@@ -1368,8 +1393,8 @@ int pki_key_compare(const ssh_key k1,
 
 ssh_string pki_key_to_blob(const ssh_key key, enum ssh_key_e type)
 {
-    ssh_buffer buffer;
-    ssh_string type_s;
+    ssh_buffer buffer = NULL;
+    ssh_string type_s = NULL;
     ssh_string str = NULL;
     ssh_string e = NULL;
     ssh_string n = NULL;
@@ -1627,7 +1652,7 @@ ssh_string pki_signature_to_blob(const ssh_signature sig)
 {
     const char *s = NULL;  /* used in RSA */
 
-    gcry_sexp_t sexp;
+    gcry_sexp_t sexp = NULL;
     size_t size = 0;
     ssh_string sig_blob = NULL;
     int rc;
@@ -1639,7 +1664,13 @@ ssh_string pki_signature_to_blob(const ssh_signature sig)
                 return NULL;
             }
             s = gcry_sexp_nth_data(sexp, 1, &size);
-            if (*s == 0) {
+
+            /*
+             * Remove leading zeroes, but only the ones that do not make the MPI
+             * representation look like a negative value (first bit is one),
+             * which might confuse some implementations.
+             */
+            while (size > 1 && s[0] == 0 && (s[1] & 0x80) == 0) {
                 size--;
                 s++;
             }
@@ -1732,7 +1763,7 @@ ssh_signature pki_signature_from_blob(const ssh_key pubkey,
                                       enum ssh_keytypes_e type,
                                       enum ssh_digest_e hash_type)
 {
-    ssh_signature sig;
+    ssh_signature sig = NULL;
     gcry_error_t err;
     size_t len;
     size_t rsalen;
@@ -1894,8 +1925,8 @@ ssh_signature pki_do_sign_hash(const ssh_key privkey,
                                enum ssh_digest_e hash_type)
 {
     const char *hash_c = NULL;
-    ssh_signature sig;
-    gcry_sexp_t sexp;
+    ssh_signature sig = NULL;
+    gcry_sexp_t sexp = NULL;
     gcry_error_t err;
 
     sig = ssh_signature_new();
@@ -2071,7 +2102,7 @@ int pki_verify_data_signature(ssh_signature signature,
                               size_t input_len)
 {
     const char *hash_type = NULL;
-    gcry_sexp_t sexp;
+    gcry_sexp_t sexp = NULL;
     gcry_error_t err;
 
     unsigned char ghash[SHA512_DIGEST_LEN + 1] = {0};
