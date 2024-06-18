@@ -314,7 +314,7 @@ int ssh_options_set_algo(ssh_session session,
  *                The hostname or ip address to connect to (const char *).
  *
  *              - SSH_OPTIONS_PORT:
- *                The port to connect to (unsigned int *).
+ *                The port to connect to (unsigned int).
  *
  *              - SSH_OPTIONS_PORT_STR:
  *                The port to connect to (const char *).
@@ -575,7 +575,7 @@ int ssh_options_set_algo(ssh_session session,
  *                configuration option as they are considered completely broken.
  *                Setting 0 will revert the value to defaults.
  *                Default is 1024 bits or 2048 bits in FIPS mode.
- *                (int *)
+ *                (int)
 
  *              - SSH_OPTIONS_IDENTITY_AGENT
  *                Set the path to the SSH agent socket. If unset, the
@@ -589,7 +589,7 @@ int ssh_options_set_algo(ssh_session session,
  *
  *              - SSH_OPTIONS_CONTROL_MASTER
  *                Set the option to enable the sharing of multiple sessions over a
- *                single network connection using connection multiplexing.
+ *                single network connection using connection multiplexing (int).
  *
  *                The possible options are among the following:
  *                 - SSH_CONTROL_MASTER_AUTO: enable connection sharing if possible
@@ -612,6 +612,21 @@ int ssh_options_set_algo(ssh_session session,
  *               type set.
  *
  * @return       0 on success, < 0 on error.
+ *
+ * @warning      When the option value to set is represented via a pointer
+ *               (e.g const char * in case of strings, ssh_key in case of a
+ *               libssh key), the value parameter should be that pointer.
+ *               Do NOT pass a pointer to a pointer (const char **, ssh_key *)
+ *
+ * @warning      When the option value to set is not a pointer (e.g int,
+ *               unsigned int, bool, long), the value parameter should be
+ *               a pointer to the location storing the value to set (int *,
+ *               unsigned int *, bool *, long *)
+ *
+ * @warning      If the value parameter has an invalid type (e.g if its not a
+ *               pointer when it should have been a pointer, or if its a pointer
+ *               to a pointer when it should have just been a pointer), then the
+ *               behaviour is undefined.
  */
 int ssh_options_set(ssh_session session, enum ssh_options_e type,
                     const void *value)
@@ -1217,10 +1232,19 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 return -1;
             } else {
                 int *x = (int *)value;
+
+                if (*x < 0) {
+                    ssh_set_error_invalid(session);
+                    return -1;
+                }
+
+                /* (*x == 0) is allowed as it is used to revert to default */
+
                 if (*x > 0 && *x < 768) {
                     ssh_set_error(session, SSH_REQUEST_DENIED,
-                                  "The provided value (%u) for minimal RSA key "
-                                  "size is too small. Use at least 768 bits.", *x);
+                                  "The provided value (%d) for minimal RSA key "
+                                  "size is too small. Use at least 768 bits.",
+                                  *x);
                     return -1;
                 }
                 session->opts.rsa_min_size = *x;
@@ -2003,13 +2027,13 @@ static int ssh_bind_set_algo(ssh_bind sshbind,
  *                        Set the IP address to bind (const char *).
  *
  *                      - SSH_BIND_OPTIONS_BINDPORT:
- *                        Set the port to bind (unsigned int *).
+ *                        Set the port to bind (unsigned int).
  *
  *                      - SSH_BIND_OPTIONS_BINDPORT_STR:
  *                        Set the port to bind (const char *).
  *
  *                      - SSH_BIND_OPTIONS_LOG_VERBOSITY:
- *                        Set the session logging verbosity (int *).
+ *                        Set the session logging verbosity (int).
  *                        The logging verbosity should have one of the
  *                        following values, which are listed in order
  *                        of increasing verbosity.  Every log message
@@ -2121,6 +2145,22 @@ static int ssh_bind_set_algo(ssh_bind sshbind,
  *
  * @return              0 on success, < 0 on error, invalid option, or
  *                      parameter.
+ *
+ * @warning             When the option value to set is represented via a
+ *                      pointer (e.g const char * in case of strings, ssh_key
+ *                      in case of a libssh key), the value parameter should be
+ *                      that pointer. Do NOT pass a pointer to a pointer (const
+ *                      char **, ssh_key *)
+ *
+ * @warning             When the option value to set is not a pointer (e.g int,
+ *                      unsigned int, bool, long), the value parameter should be
+ *                      a pointer to the location storing the value to set (int
+ *                      *, unsigned int *, bool *, long *)
+ *
+ * @warning             If the value parameter has an invalid type (e.g if its
+ *                      not a pointer when it should have been a pointer, or if
+ *                      its a pointer to a pointer when it should have just been
+ *                      a pointer), then the behaviour is undefined.
  */
 int
 ssh_bind_options_set(ssh_bind sshbind,
@@ -2467,10 +2507,18 @@ ssh_bind_options_set(ssh_bind sshbind,
             return -1;
         } else {
             int *x = (int *)value;
+
+            if (*x < 0) {
+                ssh_set_error_invalid(sshbind);
+                return -1;
+            }
+
+            /* (*x == 0) is allowed as it is used to revert to default */
+
             if (*x > 0 && *x < 768) {
                 ssh_set_error(sshbind,
                               SSH_REQUEST_DENIED,
-                              "The provided value (%u) for minimal RSA key "
+                              "The provided value (%d) for minimal RSA key "
                               "size is too small. Use at least 768 bits.",
                               *x);
                 return -1;
