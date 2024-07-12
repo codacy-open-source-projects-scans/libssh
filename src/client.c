@@ -590,10 +590,22 @@ int ssh_connect(ssh_session session)
         ssh_socket_set_fd(session->socket, session->opts.fd);
         ret = SSH_OK;
 #ifndef _WIN32
+#ifdef HAVE_PTHREAD
+    } else if (ssh_libssh_proxy_jumps() &&
+               ssh_list_count(session->opts.proxy_jumps) != 0) {
+        ret = ssh_socket_connect_proxyjump(session->socket);
+#endif /* HAVE_PTHREAD */
+#endif /* _WIN32 */
     } else if (session->opts.ProxyCommand != NULL) {
+#ifdef WITH_EXEC
         ret = ssh_socket_connect_proxycommand(session->socket,
                 session->opts.ProxyCommand);
-#endif
+#else
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "The libssh is built without support for proxy commands.");
+        ret = SSH_ERROR;
+#endif /* WITH_EXEC */
     } else {
         ret = ssh_socket_connect(session->socket,
                                  session->opts.host,
@@ -753,6 +765,7 @@ ssh_session_set_disconnect_message(ssh_session session, const char *message)
     return SSH_OK;
 }
 
+extern int proxy_disconnect;
 
 /**
  * @brief Disconnect from a session (client or server).
@@ -774,6 +787,14 @@ ssh_disconnect(ssh_session session)
     if (session == NULL) {
         return;
     }
+
+#ifndef _WIN32
+    /* Only send the disconnect to all other threads when the root session calls
+     * ssh_disconnect() */
+    if (session->proxy_root) {
+        proxy_disconnect = 1;
+    }
+#endif
 
     if (session->disconnect_message == NULL) {
         session->disconnect_message = strdup("Bye Bye") ;

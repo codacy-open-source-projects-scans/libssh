@@ -562,6 +562,7 @@ void torture_setup_socket_dir(void **state)
     const char *p;
     size_t len;
     char *env = NULL;
+    char gss_dir[1024] = {0};
     int rc;
 
     s = calloc(1, sizeof(struct torture_state));
@@ -580,6 +581,13 @@ void torture_setup_socket_dir(void **state)
 
     s->socket_dir = torture_make_temp_dir(TORTURE_SOCKET_DIR);
     assert_non_null(s->socket_dir);
+
+#ifdef WITH_GSSAPI
+    snprintf(gss_dir, sizeof(gss_dir), "%s/gss", s->socket_dir);
+    rc = mkdir(gss_dir, 0755);
+    assert_return_code(rc, errno);
+    s->gss_dir = strdup(gss_dir);
+#endif
 
     p = s->socket_dir;
 
@@ -931,6 +939,54 @@ int torture_wait_for_daemon(unsigned int seconds)
     return 1;
 }
 
+void
+torture_set_kdc_env_str(const char *gss_dir, char *env, size_t size)
+{
+    int rc;
+    rc = snprintf(env,
+                  size,
+                  "KRB5CCNAME=%s/cc "
+                  "KRB5_CONFIG=%s/k/krb5.conf "
+                  "KRB5_KDC_PROFILE=%s/k "
+                  "KRB5_KTNAME=%s/d/ssh.keytab "
+                  "KRB5RCACHETYPE=none ",
+                  gss_dir,
+                  gss_dir,
+                  gss_dir,
+                  gss_dir);
+    if (rc < 0 || rc >= (int)size) {
+        fail_msg("snprintf failed");
+    }
+}
+
+void
+torture_set_env_from_str(const char *env)
+{
+    struct ssh_tokens_st *vars = NULL, *var = NULL;
+
+    vars = ssh_tokenize(env, ' ');
+    if (vars == NULL) {
+        fail_msg("failed to tokenize environment string");
+    }
+
+    for (int i = 0; vars->tokens[i]; i++) {
+        var = ssh_tokenize(vars->tokens[i], '=');
+        if (var == NULL) {
+            ssh_tokens_free(vars);
+            fail_msg("invalid environment string format");
+        }
+        if (var->tokens[0] != NULL && var->tokens[1] != NULL) {
+            setenv(var->tokens[0], var->tokens[1], 1);
+        } else {
+            ssh_tokens_free(var);
+            ssh_tokens_free(vars);
+            fail_msg("invalid environment string format");
+        }
+        ssh_tokens_free(var);
+    }
+    ssh_tokens_free(vars);
+}
+
 /**
  * @brief Run a libssh based server under timeout.
  *
@@ -956,6 +1012,7 @@ void torture_setup_libssh_server(void **state, const char *server_path)
     char start_cmd[1024];
     char timeout_cmd[512];
     char env[1024];
+    char kdc_env[255];
     char extra_options[1024];
     int rc;
     char *ld_preload = NULL;
@@ -975,14 +1032,14 @@ void torture_setup_libssh_server(void **state, const char *server_path)
     if (s->srv_additional_config != NULL) {
         printed = snprintf(extra_options, sizeof(extra_options), " %s ",
                            s->srv_additional_config);
-        if (printed < 0) {
+        if (printed < 0 || printed >= (ssize_t)sizeof(extra_options)) {
             fail_msg("Failed to print additional config!");
             /* Unreachable */
             __builtin_unreachable();
         }
     } else {
         printed = snprintf(extra_options, sizeof(extra_options), " ");
-        if (printed < 0) {
+        if (printed < 0 || printed >= (ssize_t)sizeof(extra_options)) {
             fail_msg("Failed to print empty additional config!");
             /* Unreachable */
             __builtin_unreachable();
@@ -995,16 +1052,24 @@ void torture_setup_libssh_server(void **state, const char *server_path)
         force_fips = "";
     }
 
+    torture_set_kdc_env_str(s->gss_dir, kdc_env, sizeof(kdc_env));
+
     /* Write the environment setting */
     /* OPENSSL variable is needed to enable SHA1 */
-    printed = snprintf(env, sizeof(env),
+    printed = snprintf(env,
+                       sizeof(env),
                        "SOCKET_WRAPPER_DIR=%s "
                        "SOCKET_WRAPPER_DEFAULT_IFACE=10 "
                        "LD_PRELOAD=%s "
                        "%s "
-                       "OPENSSL_ENABLE_SHA1_SIGNATURES=1",
-                       s->socket_dir, ld_preload, force_fips);
-    if (printed < 0) {
+                       "OPENSSL_ENABLE_SHA1_SIGNATURES=1 "
+                       "NSS_WRAPPER_HOSTNAME=server.libssh.site "
+                       "%s ",
+                       s->socket_dir,
+                       ld_preload,
+                       force_fips,
+                       kdc_env);
+    if (printed < 0 || printed >= (ssize_t)sizeof(env)) {
         fail_msg("Failed to print env!");
         /* Unreachable */
         __builtin_unreachable();
@@ -1026,7 +1091,7 @@ void torture_setup_libssh_server(void **state, const char *server_path)
                        s->srv_config,
                        s->log_file ? " -l " : "", s->log_file ? s->log_file : "",
                        extra_options, TORTURE_SSH_SERVER);
-    if (printed < 0) {
+    if (printed < 0 || printed >= (ssize_t)sizeof(start_cmd)) {
         fail_msg("Failed to print start command!");
         /* Unreachable */
         __builtin_unreachable();
@@ -1080,18 +1145,32 @@ static int torture_start_sshd_server(void **state)
     struct torture_state *s = *state;
     char sshd_start_cmd[1024];
     int rc;
+    char kdc_env[255] = {0};
 
     /* Set the default interface for the server */
     setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "10", 1);
     setenv("PAM_WRAPPER", "1", 1);
 
-    snprintf(sshd_start_cmd, sizeof(sshd_start_cmd),
-             SSHD_EXECUTABLE " -r -f %s -E %s/sshd/daemon.log 2> %s/sshd/cwrap.log",
-             s->srv_config, s->socket_dir, s->socket_dir);
+#ifdef WITH_GSSAPI
+    setenv("NSS_WRAPPER_HOSTNAME", "server.libssh.site", 1);
+    torture_set_kdc_env_str(s->gss_dir, kdc_env, sizeof(kdc_env));
+#endif
+    rc = snprintf(sshd_start_cmd,
+                  sizeof(sshd_start_cmd),
+                  "%s " SSHD_EXECUTABLE
+                  " -r -f %s -E %s/sshd/daemon.log 2> %s/sshd/cwrap.log",
+                  kdc_env,
+                  s->srv_config,
+                  s->socket_dir,
+                  s->socket_dir);
+    if (rc < 0 || rc >= (int)sizeof(sshd_start_cmd)) {
+        fail_msg("snprintf failed");
+    }
 
     rc = system(sshd_start_cmd);
     assert_return_code(rc, errno);
 
+    unsetenv("NSS_WRAPPER_HOSTNAME");
     setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "21", 1);
     unsetenv("PAM_WRAPPER");
 
@@ -1113,10 +1192,100 @@ void torture_setup_sshd_server(void **state, bool pam)
     assert_int_equal(rc, 0);
 }
 
+#ifdef WITH_GSSAPI
+/**
+ * @brief Setup KDC for GSSAPI testing
+ *
+ * This should be called after sshd or libssh server's setup functions.
+ *
+ * @param[in] state A pointer to a pointer to an initialized torture_state
+ *                  structure
+ * @param[in] kadmin_script kadmin commands to be executed on the KDC
+ * @param[in] kinit_script kinit commands to get the TGT
+ *
+ */
+void
+torture_setup_kdc_server(void **state,
+                         const char *kadmin_script,
+                         const char *kinit_script)
+{
+    struct torture_state *s = *state;
+    int rc;
+    char command[1024] = {0};
+    char kdc_env[255] = {0};
+    char kadmin_file[255] = {0};
+    char kinit_file[255] = {0};
+
+    /* Remove the previous files and folders, but keep the same directory
+     * because we pass only one temporary directory to the server */
+    rc = snprintf(command, sizeof(command), "rm -rf %s/*", s->gss_dir);
+    if (rc < 0 || rc >= (int)sizeof(command)) {
+        fail_msg("snprintf failed");
+    }
+    rc = system(command);
+    assert_return_code(rc, errno);
+
+    setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "11", 1);
+    setenv("NSS_WRAPPER_HOSTNAME", "kdc.libssh.site", 1);
+
+    torture_set_kdc_env_str(s->gss_dir, kdc_env, sizeof(kdc_env));
+    torture_set_env_from_str(kdc_env);
+
+    snprintf(kadmin_file, sizeof(kadmin_file), "%s/kadmin.sh", s->gss_dir);
+    snprintf(kinit_file, sizeof(kinit_file), "%s/kinit.sh", s->gss_dir);
+
+    torture_write_file(kadmin_file, kadmin_script);
+    torture_write_file(kinit_file, kinit_script);
+
+    rc = snprintf(command,
+                  sizeof(command),
+                  "%s/tests/gss/kdcsetup.sh %s",
+                  BINARYDIR,
+                  s->socket_dir);
+    if (rc < 0 || rc >= (int)sizeof(command)) {
+        fail_msg("snprintf failed");
+    }
+    rc = system(command);
+    assert_return_code(rc, errno);
+    assert_int_equal(rc, 0);
+
+    unsetenv("NSS_WRAPPER_HOSTNAME");
+    /* Back to client */
+    setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "21", 1);
+}
+
+/**
+ * @brief Teardown KDC
+ *
+ * This should be called before sshd or libssh server's teardown functions.
+ *
+ * @param[in] state A pointer to a pointer to an initialized torture_state
+ *                  structure
+ */
+void
+torture_teardown_kdc_server(void **state)
+{
+    struct torture_state *s = *state;
+    int rc;
+    char pid_path[1024] = {0};
+
+    rc = snprintf(pid_path, sizeof(pid_path), "%s/pid", s->gss_dir);
+    if (rc < 0 || rc >= (int)sizeof(pid_path)) {
+        fail_msg("snprintf failed");
+    }
+    rc = torture_terminate_process(pid_path);
+    assert_return_code(rc, errno);
+}
+
+#endif /* WITH_GSSAPI */
+
 void torture_free_state(struct torture_state *s)
 {
     free(s->srv_config);
     free(s->socket_dir);
+#ifdef WITH_GSSAPI
+    free(s->gss_dir);
+#endif
     free(s->pcap_file);
     free(s->log_file);
     free(s->srv_pidfile);
@@ -1196,7 +1365,6 @@ void torture_teardown_sshd_server(void **state)
 
     rc = torture_terminate_process(s->srv_pidfile);
     assert_return_code(rc, errno);
-
     torture_teardown_socket_dir(state);
 }
 #endif /* SSHD_EXECUTABLE */
@@ -1653,6 +1821,36 @@ void torture_write_file(const char *filename, const char *data){
 void torture_reset_config(ssh_session session)
 {
     memset(session->opts.options_seen, 0, sizeof(session->opts.options_seen));
+    if (ssh_libssh_proxy_jumps()) {
+        ssh_proxyjumps_free(session->opts.proxy_jumps);
+    }
+}
+
+void torture_unsetenv(const char *variable)
+{
+    int rc;
+#ifdef WIN32
+    rc = _putenv_s(variable, "");
+#else
+    rc = unsetenv(variable);
+#endif  // WIN32
+    assert_return_code(rc, errno);
+}
+
+void torture_setenv(const char *variable, const char *value)
+{
+    int rc;
+#ifdef WIN32
+    if (value != NULL) {
+        rc = _putenv_s(variable, value);
+        assert_return_code(rc, errno);
+    } else {
+        torture_unsetenv(variable);
+    }
+#else
+    rc = setenv(variable, value, 1);
+    assert_return_code(rc, errno);
+#endif  // WIN32
 }
 
 #if defined(HAVE_WEAK_ATTRIBUTE) && defined(TORTURE_SHARED)

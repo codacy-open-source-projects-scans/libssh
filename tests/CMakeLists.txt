@@ -18,6 +18,12 @@ set(TORTURE_LINK_LIBRARIES
     ${CMOCKA_LIBRARY}
     ssh::static)
 
+if (NOT WIN32)
+    set(TORTURE_LINK_LIBRARIES
+        ${TORTURE_LINK_LIBRARIES}
+        pthread)
+endif(NOT WIN32)
+
 # create test library
 add_library(${TORTURE_LIBRARY}
             STATIC
@@ -257,7 +263,7 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     # ssh_ping
     add_executable(ssh_ping ssh_ping.c)
     target_compile_options(ssh_ping PRIVATE ${DEFAULT_C_COMPILE_FLAGS})
-    target_link_libraries(ssh_ping ssh::static)
+    target_link_libraries(ssh_ping ssh::static pthread)
 
     # homedir will be used in passwd
     set(HOMEDIR ${CMAKE_CURRENT_BINARY_DIR}/home)
@@ -335,6 +341,8 @@ if (WITH_PKCS11_URI)
     #Copy the script to setup PKCS11 tokens
     file(COPY pkcs11/setup-softhsm-tokens.sh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/pkcs11 FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif (WITH_PKCS11_URI)
+
+file(COPY gss/kdcsetup.sh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/gss FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 
 message(STATUS "TORTURE_ENVIRONMENT=${TORTURE_ENVIRONMENT}")
 
