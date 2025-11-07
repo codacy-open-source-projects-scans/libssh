@@ -5,13 +5,13 @@
 #include "examples_common.h"
 
 int main(void) {
-    ssh_session session;
-    ssh_channel channel;
+    ssh_session session = NULL;
+    ssh_channel channel = NULL;
     char buffer[256];
     int rbytes, wbytes, total = 0;
     int rc;
 
-    session = connect_ssh("localhost", NULL, 0);
+    session = connect_ssh("localhost", NULL, NULL, 0);
     if (session == NULL) {
         ssh_finalize();
         return 1;

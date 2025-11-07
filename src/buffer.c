@@ -371,7 +371,8 @@ int ssh_buffer_allocate_size(struct ssh_buffer_struct *buffer,
  */
 void *ssh_buffer_allocate(struct ssh_buffer_struct *buffer, uint32_t len)
 {
-    void *ptr;
+    void *ptr = NULL;
+
     buffer_verify(buffer);
 
     if (buffer->used + len < len) {
@@ -406,20 +407,26 @@ void *ssh_buffer_allocate(struct ssh_buffer_struct *buffer, uint32_t len)
  *
  * @return              0 on success, < 0 on error.
  */
-int ssh_buffer_add_ssh_string(struct ssh_buffer_struct *buffer,
-    struct ssh_string_struct *string) {
-  uint32_t len = 0;
+int
+ssh_buffer_add_ssh_string(struct ssh_buffer_struct *buffer,
+                          struct ssh_string_struct *string)
+{
+    size_t len;
+    int rc;
 
-  if (string == NULL) {
-      return -1;
-  }
+    if (string == NULL) {
+        return -1;
+    }
 
-  len = ssh_string_len(string);
-  if (ssh_buffer_add_data(buffer, string, len + sizeof(uint32_t)) < 0) {
-    return -1;
-  }
+    len = ssh_string_len(string) + sizeof(uint32_t);
+    /* this can't overflow the uint32_t as the
+     * STRING_SIZE_MAX is (UINT32_MAX >> 8) + 1 */
+    rc = ssh_buffer_add_data(buffer, string, (uint32_t)len);
+    if (rc < 0) {
+        return -1;
+    }
 
-  return 0;
+    return 0;
 }
 
 /**
@@ -608,6 +615,53 @@ void *ssh_buffer_get(struct ssh_buffer_struct *buffer){
 uint32_t ssh_buffer_get_len(struct ssh_buffer_struct *buffer){
   buffer_verify(buffer);
   return buffer->used - buffer->pos;
+}
+
+/**
+ * @internal
+ *
+ * @brief Duplicate an existing buffer.
+ *
+ * Creates a new ssh_buffer and copies all data from the source buffer.
+ * The new buffer preserves the secure flag setting of the source.
+ *
+ * @param[in]  buffer   The buffer to duplicate. Can be NULL.
+ *
+ * @return              A new buffer containing a copy of the data on success,
+ *                      NULL on failure or if buffer is NULL.
+ *
+ * @see ssh_buffer_free()
+ */
+ssh_buffer ssh_buffer_dup(const ssh_buffer buffer)
+{
+    ssh_buffer new_buffer = NULL;
+    int rc;
+
+    if (buffer == NULL) {
+        return NULL;
+    }
+
+    buffer_verify(buffer);
+
+    new_buffer = ssh_buffer_new();
+    if (new_buffer == NULL) {
+        return NULL;
+    }
+
+    new_buffer->secure = buffer->secure;
+
+    if (ssh_buffer_get_len(buffer) > 0) {
+        rc = ssh_buffer_add_data(new_buffer,
+                                 ssh_buffer_get(buffer),
+                                 ssh_buffer_get_len(buffer));
+        if (rc != SSH_OK) {
+            ssh_buffer_free(new_buffer);
+            return NULL;
+        }
+    }
+
+    buffer_verify(new_buffer);
+    return new_buffer;
 }
 
 /**
@@ -822,6 +876,7 @@ static int ssh_buffer_pack_allocate_va(struct ssh_buffer_struct *buffer,
     const char *p = NULL;
     ssh_string string = NULL;
     char *cstring = NULL;
+    bignum b = NULL;
     size_t needed_size = 0;
     size_t len;
     size_t count;
@@ -852,7 +907,7 @@ static int ssh_buffer_pack_allocate_va(struct ssh_buffer_struct *buffer,
             break;
         case 'S':
             string = va_arg(ap, ssh_string);
-            needed_size += 4 + ssh_string_len(string);
+            needed_size += sizeof(uint32_t) + ssh_string_len(string);
             string = NULL;
             break;
         case 's':
@@ -866,13 +921,18 @@ static int ssh_buffer_pack_allocate_va(struct ssh_buffer_struct *buffer,
             va_arg(ap, void *);
             count++; /* increase argument count */
             break;
+        case 'F':
         case 'B':
-            va_arg(ap, bignum);
-            /*
-             * Use a fixed size for a bignum
-             * (they should normally be around 32)
-             */
-            needed_size += 64;
+            b = va_arg(ap, bignum);
+            if (*p == 'F') {
+                /* For padded bignum, we know the exact length */
+                len = va_arg(ap, size_t);
+                count++; /* increase argument count */
+                needed_size += sizeof(uint32_t) + len;
+            } else {
+                /* The bignum bytes + 1 for possible padding */
+                needed_size += sizeof(uint32_t) + bignum_num_bytes(b) + 1;
+            }
             break;
         case 't':
             cstring = va_arg(ap, char *);
@@ -926,7 +986,7 @@ ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
                    va_list ap)
 {
     int rc = SSH_ERROR;
-    const char *p;
+    const char *p = NULL;
     union {
         uint8_t byte;
         uint16_t word;
@@ -935,7 +995,7 @@ ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
         ssh_string string;
         void *data;
     } o;
-    char *cstring;
+    char *cstring = NULL;
     bignum b;
     size_t len;
     size_t count;
@@ -978,24 +1038,40 @@ ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
         case 's':
             cstring = va_arg(ap, char *);
             len = strlen(cstring);
-            rc = ssh_buffer_add_u32(buffer, htonl(len));
+            if (len > UINT32_MAX) {
+                rc = SSH_ERROR;
+                break;
+            }
+            o.dword = (uint32_t)len;
+            rc = ssh_buffer_add_u32(buffer, htonl(o.dword));
             if (rc == SSH_OK){
-                rc = ssh_buffer_add_data(buffer, cstring, len);
+                rc = ssh_buffer_add_data(buffer, cstring, o.dword);
             }
             cstring = NULL;
             break;
         case 'P':
             len = va_arg(ap, size_t);
+            if (len > UINT32_MAX) {
+                rc = SSH_ERROR;
+                break;
+            }
 
             o.data = va_arg(ap, void *);
             count++; /* increase argument count */
 
-            rc = ssh_buffer_add_data(buffer, o.data, len);
+            rc = ssh_buffer_add_data(buffer, o.data, (uint32_t)len);
             o.data = NULL;
             break;
+        case 'F':
         case 'B':
             b = va_arg(ap, bignum);
-            o.string = ssh_make_bignum_string(b);
+            if (*p == 'F') {
+                len = va_arg(ap, size_t);
+                count++; /* increase argument count */
+                o.string = ssh_make_padded_bignum_string(b, len);
+            } else {
+                o.string = ssh_make_bignum_string(b);
+            }
             if(o.string == NULL){
                 rc = SSH_ERROR;
                 break;
@@ -1006,7 +1082,11 @@ ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
         case 't':
             cstring = va_arg(ap, char *);
             len = strlen(cstring);
-            rc = ssh_buffer_add_data(buffer, cstring, len);
+            if (len > UINT32_MAX) {
+                rc = SSH_ERROR;
+                break;
+            }
+            rc = ssh_buffer_add_data(buffer, cstring, (uint32_t)len);
             cstring = NULL;
             break;
         default:
@@ -1047,6 +1127,8 @@ ssh_buffer_pack_va(struct ssh_buffer_struct *buffer,
  *                         'P': size_t, void * (len of data, pointer to data)
  *                              only pushes data.
  *                         'B': bignum (pushed as SSH string)
+ *                         'F': bignum, size_t (bignum, padded to fixed length,
+ *                              pushed as SSH string)
  * @returns             SSH_OK on success
  *                      SSH_ERROR on error
  * @warning             when using 'P' with a constant size (e.g. 8), do not
@@ -1094,7 +1176,7 @@ int ssh_buffer_unpack_va(struct ssh_buffer_struct *buffer,
                          va_list ap)
 {
     int rc = SSH_ERROR;
-    const char *p = format, *last;
+    const char *p = format, *last = NULL;
     union {
         uint8_t *byte;
         uint16_t *word;
@@ -1186,28 +1268,28 @@ int ssh_buffer_unpack_va(struct ssh_buffer_struct *buffer,
             if (rlen != 4){
                 break;
             }
-            len = ntohl(u32len);
-            if (len > max_len - 1) {
+            u32len = ntohl(u32len);
+            if (u32len > max_len - 1) {
                 break;
             }
 
-            rc = ssh_buffer_validate_length(buffer, len);
+            rc = ssh_buffer_validate_length(buffer, u32len);
             if (rc != SSH_OK) {
                 break;
             }
 
-            *o.cstring = malloc(len + 1);
+            *o.cstring = malloc(u32len + 1);
             if (*o.cstring == NULL){
                 rc = SSH_ERROR;
                 break;
             }
-            rlen = ssh_buffer_get_data(buffer, *o.cstring, len);
-            if (rlen != len){
+            rlen = ssh_buffer_get_data(buffer, *o.cstring, u32len);
+            if (rlen != u32len) {
                 SAFE_FREE(*o.cstring);
                 rc = SSH_ERROR;
                 break;
             }
-            (*o.cstring)[len] = '\0';
+            (*o.cstring)[u32len] = '\0';
             o.cstring = NULL;
             rc = SSH_OK;
             break;
@@ -1232,7 +1314,7 @@ int ssh_buffer_unpack_va(struct ssh_buffer_struct *buffer,
                 rc = SSH_ERROR;
                 break;
             }
-            rlen = ssh_buffer_get_data(buffer, *o.data, len);
+            rlen = ssh_buffer_get_data(buffer, *o.data, (uint32_t)len);
             if (rlen != len){
                 SAFE_FREE(*o.data);
                 rc = SSH_ERROR;

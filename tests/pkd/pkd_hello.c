@@ -22,6 +22,11 @@
 #include "pkd_keyutil.h"
 #include "pkd_util.h"
 
+#if defined(HAVE_LIBCRYPTO)
+/* for OPENSSL_cleanup() of OpenSSL context */
+#include <openssl/crypto.h>
+#endif
+
 #define DEFAULT_ITERATIONS 10
 static struct pkd_daemon_args pkd_dargs;
 
@@ -217,10 +222,7 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
 
 #define PKDTESTS_DEFAULT(f, client, cmd) \
     /* Default passes by server key type. */ \
-    PKDTESTS_DEFAULT_FIPS(f, client, cmd)
-
-#define PKDTESTS_DEFAULT_OPENSSHONLY(f, client, cmd) \
-    /* Default passes by server key type. */ \
+    PKDTESTS_DEFAULT_FIPS(f, client, cmd) \
     f(client, ed25519_default,    cmd,  setup_ed25519,    teardown)
 
 #define GEX_SHA256 "diffie-hellman-group-exchange-sha256"
@@ -280,8 +282,46 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
     f(client, ecdsa_521_diffie_hellman_group18_sha512,kexcmd("diffie-hellman-group18-sha512"), setup_ecdsa_521,  teardown)
 #endif
 
+#ifdef OPENSSH_SNTRUP761X25519_SHA512_OPENSSH_COM
+#define SNTRUP_OPENSSH_NAME "sntrup761x25519-sha512@openssh.com"
+#define PKDTESTS_KEX_SNTRUP761_OPENSSH(f, client, kexcmd) \
+    f(client, rsa_sntrup761x25519_sha512_openssh_com,       kexcmd(SNTRUP_OPENSSH_NAME), setup_rsa,       teardown) \
+    f(client, ecdsa_256_sntrup761x25519_sha512_openssh_com, kexcmd(SNTRUP_OPENSSH_NAME), setup_ecdsa_256, teardown) \
+    f(client, ecdsa_384_sntrup761x25519_sha512_openssh_com, kexcmd(SNTRUP_OPENSSH_NAME), setup_ecdsa_384, teardown) \
+    f(client, ecdsa_521_sntrup761x25519_sha512_openssh_com, kexcmd(SNTRUP_OPENSSH_NAME), setup_ecdsa_521, teardown) \
+    f(client, ed25519_sntrup761x25519_sha512_openssh_com,   kexcmd(SNTRUP_OPENSSH_NAME), setup_ed25519,   teardown)
+#else
+#define PKDTESTS_KEX_SNTRUP761_OPENSSH(f, client, kexcmd)
+#endif
+
+#ifdef OPENSSH_SNTRUP761X25519_SHA512
+#define SNTRUP_NAME         "sntrup761x25519-sha512"
+#define PKDTESTS_KEX_SNTRUP761(f, client, kexcmd) \
+    f(client, rsa_sntrup761x25519_sha512,                   kexcmd(SNTRUP_NAME),         setup_rsa,       teardown) \
+    f(client, ecdsa_256_sntrup761x25519_sha512,             kexcmd(SNTRUP_NAME),         setup_ecdsa_256, teardown) \
+    f(client, ecdsa_384_sntrup761x25519_sha512,             kexcmd(SNTRUP_NAME),         setup_ecdsa_384, teardown) \
+    f(client, ecdsa_521_sntrup761x25519_sha512,             kexcmd(SNTRUP_NAME),         setup_ecdsa_521, teardown) \
+    f(client, ed25519_sntrup761x25519_sha512,               kexcmd(SNTRUP_NAME),         setup_ed25519,   teardown)
+#else
+#define PKDTESTS_KEX_SNTRUP761(f, client, kexcmd)
+#endif
+
+#if defined(HAVE_MLKEM) && defined(OPENSSH_MLKEM768X25519_SHA256)
+#define PKDTESTS_KEX_MLKEM768(f, client, kexcmd) \
+    f(client, rsa_mlkem768x25519_sha256,       kexcmd("mlkem768x25519-sha256"), setup_rsa,       teardown) \
+    f(client, ecdsa_256_mlkem768x25519_sha256, kexcmd("mlkem768x25519-sha256"), setup_ecdsa_256, teardown) \
+    f(client, ecdsa_384_mlkem768x25519_sha256, kexcmd("mlkem768x25519-sha256"), setup_ecdsa_384, teardown) \
+    f(client, ecdsa_521_mlkem768x25519_sha256, kexcmd("mlkem768x25519-sha256"), setup_ecdsa_521, teardown) \
+    f(client, ed25519_mlkem768x25519_sha256,   kexcmd("mlkem768x25519-sha256"), setup_ed25519,   teardown)
+#else
+#define PKDTESTS_KEX_MLKEM768(f, client, kexcmd)
+#endif
+
 #define PKDTESTS_KEX_COMMON(f, client, kexcmd) \
     PKDTESTS_KEX_FIPS(f, client, kexcmd) \
+    PKDTESTS_KEX_SNTRUP761(f, client, kexcmd) \
+    PKDTESTS_KEX_SNTRUP761_OPENSSH(f, client, kexcmd) \
+    PKDTESTS_KEX_MLKEM768(f, client, kexcmd) \
     f(client, rsa_curve25519_sha256,                  kexcmd("curve25519-sha256"),             setup_rsa,        teardown) \
     f(client, rsa_curve25519_sha256_libssh_org,       kexcmd("curve25519-sha256@libssh.org"),  setup_rsa,        teardown) \
     f(client, rsa_diffie_hellman_group14_sha1,        kexcmd("diffie-hellman-group14-sha1"),   setup_rsa,        teardown) \
@@ -311,11 +351,6 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
 #else
 #define PKDTESTS_KEX(f, client, kexcmd) \
     /* Kex algorithms. */ \
-    PKDTESTS_KEX_COMMON(f, client, kexcmd)
-#endif
-
-#define PKDTESTS_KEX_OPENSSHONLY(f, client, kexcmd) \
-    /* Kex algorithms. */ \
     f(client, ed25519_curve25519_sha256,              kexcmd("curve25519-sha256"),             setup_ed25519,    teardown) \
     f(client, ed25519_curve25519_sha256_libssh_org,   kexcmd("curve25519-sha256@libssh.org"),  setup_ed25519,    teardown) \
     f(client, ed25519_ecdh_sha2_nistp256,             kexcmd("ecdh-sha2-nistp256"),            setup_ed25519,    teardown) \
@@ -327,8 +362,7 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
     f(client, ed25519_diffie_hellman_group1_sha1,     kexcmd("diffie-hellman-group1-sha1"),    setup_ed25519,    teardown) \
     f(client, ed25519_diffie_hellman_group_exchange_sha256, kexcmd(GEX_SHA256),                setup_ed25519,    teardown) \
     f(client, ed25519_diffie_hellman_group_exchange_sha1, kexcmd(GEX_SHA1),                    setup_ed25519,    teardown)
-
-#define CHACHA20 "chacha20-poly1305@openssh.com"
+#endif
 
 #define PKDTESTS_CIPHER_COMMON(f, client, ciphercmd) \
     f(client, rsa_aes128_ctr,          ciphercmd("aes128-ctr"),    setup_rsa,        teardown) \
@@ -351,6 +385,7 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
     f(client, ecdsa_521_aes128_cbc,    ciphercmd("aes128-cbc"),    setup_ecdsa_521,  teardown) \
     f(client, ecdsa_521_aes256_cbc,    ciphercmd("aes256-cbc"),    setup_ecdsa_521,  teardown)
 
+#define CHACHA20 "chacha20-poly1305@openssh.com"
 #define PKDTESTS_CIPHER_CHACHA(f, client, ciphercmd) \
     f(client, rsa_chacha20,            ciphercmd(CHACHA20),        setup_rsa,        teardown) \
     f(client, ed25519_chacha20,        ciphercmd(CHACHA20),        setup_ed25519,    teardown) \
@@ -361,7 +396,9 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
 #define PKDTESTS_CIPHER(f, client, ciphercmd) \
     /* Ciphers. */ \
     PKDTESTS_CIPHER_COMMON(f, client, ciphercmd) \
-    PKDTESTS_CIPHER_CHACHA(f, client, ciphercmd)
+    PKDTESTS_CIPHER_CHACHA(f, client, ciphercmd) \
+    f(client, ed25519_aes128_ctr,      ciphercmd("aes128-ctr"),    setup_ed25519,    teardown) \
+    f(client, ed25519_aes256_ctr,      ciphercmd("aes256-ctr"),    setup_ed25519,    teardown)
 
 #define AES128_GCM "aes128-gcm@openssh.com"
 #define AES256_GCM "aes256-gcm@openssh.com"
@@ -386,9 +423,7 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
     f(client, rsa_aes192_ctr,          ciphercmd("aes192-ctr"),    setup_rsa,        teardown) \
     f(client, ed25519_3des_cbc,        ciphercmd("3des-cbc"),      setup_ed25519,    teardown) \
     f(client, ed25519_aes128_cbc,      ciphercmd("aes128-cbc"),    setup_ed25519,    teardown) \
-    f(client, ed25519_aes128_ctr,      ciphercmd("aes128-ctr"),    setup_ed25519,    teardown) \
     f(client, ed25519_aes256_cbc,      ciphercmd("aes256-cbc"),    setup_ed25519,    teardown) \
-    f(client, ed25519_aes256_ctr,      ciphercmd("aes256-ctr"),    setup_ed25519,    teardown) \
     f(client, ed25519_aes192_cbc,      ciphercmd("aes192-cbc"),    setup_ed25519,    teardown) \
     f(client, ed25519_aes192_ctr,      ciphercmd("aes192-ctr"),    setup_ed25519,    teardown) \
     f(client, ed25519_aes128_gcm,      ciphercmd(AES128_GCM),      setup_ed25519,    teardown) \
@@ -410,17 +445,33 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
     f(client, ecdsa_521_aes192_ctr,    ciphercmd("aes192-ctr"),    setup_ecdsa_521,  teardown)
 
 
-#define PKDTESTS_MAC_FIPS(f, client, maccmd) \
-    f(client, ecdsa_256_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_256,  teardown) \
+#define PKDTESTS_MAC_FIPS_BASE(f, client, maccmd) \
     f(client, ecdsa_256_hmac_sha2_256,      maccmd("hmac-sha2-256"),                  setup_ecdsa_256,  teardown) \
-    f(client, ecdsa_384_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_384,  teardown) \
     f(client, ecdsa_384_hmac_sha2_256,      maccmd("hmac-sha2-256"),                  setup_ecdsa_384,  teardown) \
-    f(client, ecdsa_521_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_521,  teardown) \
     f(client, ecdsa_521_hmac_sha2_256,      maccmd("hmac-sha2-256"),                  setup_ecdsa_521,  teardown) \
-    f(client, rsa_hmac_sha1,                maccmd("hmac-sha1"),                      setup_rsa,        teardown) \
     f(client, rsa_hmac_sha2_256,            maccmd("hmac-sha2-256"),                  setup_rsa,        teardown)
 
+#define PKDTESTS_MAC_FIPS_SHA1(f, client, maccmd) \
+    f(client, ecdsa_256_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_256,  teardown) \
+    f(client, ecdsa_384_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_384,  teardown) \
+    f(client, ecdsa_521_hmac_sha1,          maccmd("hmac-sha1"),                      setup_ecdsa_521,  teardown) \
+    f(client, rsa_hmac_sha1,                maccmd("hmac-sha1"),                      setup_rsa,        teardown)
+
+#ifdef DROPBEAR_SUPPORTS_HMAC_SHA1
+#define PKDTESTS_MAC_FIPS(f, client, maccmd)  \
+    PKDTESTS_MAC_FIPS_BASE(f, client, maccmd) \
+    PKDTESTS_MAC_FIPS_SHA1(f, client, maccmd) \
+    f(client, ed25519_hmac_sha1,            maccmd("hmac-sha1"),                      setup_ed25519,    teardown)
+#define PKDTESTS_MAC_OPENSSHONLY_FIPS_SHA1(f, client, maccmd)
+#else
+#define PKDTESTS_MAC_FIPS(f, client, maccmd) \
+    PKDTESTS_MAC_FIPS_BASE(f, client, maccmd)
+#define PKDTESTS_MAC_OPENSSHONLY_FIPS_SHA1(f, client, maccmd) \
+    PKDTESTS_MAC_FIPS_SHA1(f, client, maccmd)
+#endif
+
 #define PKDTESTS_MAC_OPENSSHONLY_FIPS(f, client, maccmd) \
+    PKDTESTS_MAC_OPENSSHONLY_FIPS_SHA1(f, client, maccmd) \
     f(client, ecdsa_256_hmac_sha1_etm,      maccmd("hmac-sha1-etm@openssh.com"),      setup_ecdsa_256,  teardown) \
     f(client, ecdsa_256_hmac_sha2_256_etm,  maccmd("hmac-sha2-256-etm@openssh.com"),  setup_ecdsa_256,  teardown) \
     f(client, ecdsa_256_hmac_sha2_512,      maccmd("hmac-sha2-512"),                  setup_ecdsa_256,  teardown) \
@@ -440,12 +491,12 @@ static int torture_pkd_setup_ecdsa_521(void **state) {
 
 #define PKDTESTS_MAC(f, client, maccmd) \
     /* MACs. */ \
-    PKDTESTS_MAC_FIPS(f, client, maccmd)
+    PKDTESTS_MAC_FIPS(f, client, maccmd) \
+    f(client, ed25519_hmac_sha2_256,        maccmd("hmac-sha2-256"),                  setup_ed25519,    teardown)
+
 #define PKDTESTS_MAC_OPENSSHONLY(f, client, maccmd) \
     PKDTESTS_MAC_OPENSSHONLY_FIPS(f, client, maccmd) \
-    f(client, ed25519_hmac_sha1,            maccmd("hmac-sha1"),                      setup_ed25519,    teardown) \
     f(client, ed25519_hmac_sha1_etm,        maccmd("hmac-sha1-etm@openssh.com"),      setup_ed25519,    teardown) \
-    f(client, ed25519_hmac_sha2_256,        maccmd("hmac-sha2-256"),                  setup_ed25519,    teardown) \
     f(client, ed25519_hmac_sha2_256_etm,    maccmd("hmac-sha2-256-etm@openssh.com"),  setup_ed25519,    teardown) \
     f(client, ed25519_hmac_sha2_512,        maccmd("hmac-sha2-512"),                  setup_ed25519,    teardown) \
     f(client, ed25519_hmac_sha2_512_etm,    maccmd("hmac-sha2-512-etm@openssh.com"),  setup_ed25519,    teardown)
@@ -508,9 +559,7 @@ static void torture_pkd_runtest(const char *testname,
 PKDTESTS_DEFAULT(emit_keytest, openssh_rsa, OPENSSH_CMD)
 PKDTESTS_DEFAULT(emit_keytest, openssh_cert_rsa, OPENSSH_CERT_CMD)
 PKDTESTS_DEFAULT(emit_keytest, openssh_sha256_cert_rsa, OPENSSH_SHA256_CERT_CMD)
-PKDTESTS_DEFAULT_OPENSSHONLY(emit_keytest, openssh_rsa, OPENSSH_CMD)
 PKDTESTS_KEX(emit_keytest, openssh_rsa, OPENSSH_KEX_CMD)
-PKDTESTS_KEX_OPENSSHONLY(emit_keytest, openssh_rsa, OPENSSH_KEX_CMD)
 PKDTESTS_CIPHER(emit_keytest, openssh_rsa, OPENSSH_CIPHER_CMD)
 PKDTESTS_CIPHER_OPENSSHONLY(emit_keytest, openssh_rsa, OPENSSH_CIPHER_CMD)
 PKDTESTS_MAC(emit_keytest, openssh_rsa, OPENSSH_MAC_CMD)
@@ -521,9 +570,7 @@ PKDTESTS_HOSTKEY_OPENSSHONLY(emit_keytest, openssh_rsa, OPENSSH_HOSTKEY_CMD)
 #define CLIENT_ID_FILE OPENSSH_ECDSA256_TESTKEY
 PKDTESTS_DEFAULT(emit_keytest, openssh_e256, OPENSSH_CMD)
 PKDTESTS_DEFAULT(emit_keytest, openssh_cert_e256, OPENSSH_CERT_CMD)
-PKDTESTS_DEFAULT_OPENSSHONLY(emit_keytest, openssh_e256, OPENSSH_CMD)
 PKDTESTS_KEX(emit_keytest, openssh_e256, OPENSSH_KEX_CMD)
-PKDTESTS_KEX_OPENSSHONLY(emit_keytest, openssh_e256, OPENSSH_KEX_CMD)
 PKDTESTS_CIPHER(emit_keytest, openssh_e256, OPENSSH_CIPHER_CMD)
 PKDTESTS_CIPHER_OPENSSHONLY(emit_keytest, openssh_e256, OPENSSH_CIPHER_CMD)
 PKDTESTS_MAC(emit_keytest, openssh_e256, OPENSSH_MAC_CMD)
@@ -537,9 +584,7 @@ PKDTESTS_MAC_OPENSSHONLY(emit_keytest, openssh_e256, OPENSSH_MAC_CMD)
 #define CLIENT_ID_FILE OPENSSH_ED25519_TESTKEY
 PKDTESTS_DEFAULT(emit_keytest, openssh_ed, OPENSSH_CMD)
 PKDTESTS_DEFAULT(emit_keytest, openssh_cert_ed, OPENSSH_CERT_CMD)
-PKDTESTS_DEFAULT_OPENSSHONLY(emit_keytest, openssh_ed, OPENSSH_CMD)
 PKDTESTS_KEX(emit_keytest, openssh_ed, OPENSSH_KEX_CMD)
-PKDTESTS_KEX_OPENSSHONLY(emit_keytest, openssh_ed, OPENSSH_KEX_CMD)
 PKDTESTS_CIPHER(emit_keytest, openssh_ed, OPENSSH_CIPHER_CMD)
 PKDTESTS_CIPHER_OPENSSHONLY(emit_keytest, openssh_ed, OPENSSH_CIPHER_CMD)
 PKDTESTS_MAC(emit_keytest, openssh_ed, OPENSSH_MAC_CMD)
@@ -547,9 +592,21 @@ PKDTESTS_MAC_OPENSSHONLY(emit_keytest, openssh_ed, OPENSSH_MAC_CMD)
 #undef CLIENT_ID_FILE
 
 #define CLIENT_ID_FILE DROPBEAR_RSA_TESTKEY
-PKDTESTS_DEFAULT(emit_keytest, dropbear, DROPBEAR_CMD)
-PKDTESTS_CIPHER(emit_keytest, dropbear, DROPBEAR_CIPHER_CMD)
-PKDTESTS_MAC(emit_keytest, dropbear, DROPBEAR_MAC_CMD)
+PKDTESTS_DEFAULT(emit_keytest, dropbear_rsa, DROPBEAR_CMD)
+PKDTESTS_CIPHER(emit_keytest, dropbear_rsa, DROPBEAR_CIPHER_CMD)
+PKDTESTS_MAC(emit_keytest, dropbear_rsa, DROPBEAR_MAC_CMD)
+#undef CLIENT_ID_FILE
+
+#define CLIENT_ID_FILE DROPBEAR_ECDSA256_TESTKEY
+PKDTESTS_DEFAULT(emit_keytest, dropbear_e256, DROPBEAR_CMD)
+PKDTESTS_CIPHER(emit_keytest, dropbear_e256, DROPBEAR_CIPHER_CMD)
+PKDTESTS_MAC(emit_keytest, dropbear_e256, DROPBEAR_MAC_CMD)
+#undef CLIENT_ID_FILE
+
+#define CLIENT_ID_FILE DROPBEAR_ED25519_TESTKEY
+PKDTESTS_DEFAULT(emit_keytest, dropbear_ed, DROPBEAR_CMD)
+PKDTESTS_CIPHER(emit_keytest, dropbear_ed, DROPBEAR_CIPHER_CMD)
+PKDTESTS_MAC(emit_keytest, dropbear_ed, DROPBEAR_MAC_CMD)
 #undef CLIENT_ID_FILE
 
 /*
@@ -579,9 +636,7 @@ struct {
     PKDTESTS_DEFAULT(emit_testmap, openssh_rsa, OPENSSH_CMD)
     PKDTESTS_DEFAULT(emit_testmap, openssh_cert_rsa, OPENSSH_CERT_CMD)
     PKDTESTS_DEFAULT(emit_testmap, openssh_sha256_cert_rsa, OPENSSH_SHA256_CERT_CMD)
-    PKDTESTS_DEFAULT_OPENSSHONLY(emit_testmap, openssh_rsa, OPENSSH_CMD)
     PKDTESTS_KEX(emit_testmap, openssh_rsa, OPENSSH_KEX_CMD)
-    PKDTESTS_KEX_OPENSSHONLY(emit_testmap, openssh_rsa, OPENSSH_KEX_CMD)
     PKDTESTS_CIPHER(emit_testmap, openssh_rsa, OPENSSH_CIPHER_CMD)
     PKDTESTS_CIPHER_OPENSSHONLY(emit_testmap, openssh_rsa, OPENSSH_CIPHER_CMD)
     PKDTESTS_MAC(emit_testmap, openssh_rsa, OPENSSH_MAC_CMD)
@@ -590,9 +645,7 @@ struct {
 
     PKDTESTS_DEFAULT(emit_testmap, openssh_e256, OPENSSH_CMD)
     PKDTESTS_DEFAULT(emit_testmap, openssh_cert_e256, OPENSSH_CERT_CMD)
-    PKDTESTS_DEFAULT_OPENSSHONLY(emit_testmap, openssh_e256, OPENSSH_CMD)
     PKDTESTS_KEX(emit_testmap, openssh_e256, OPENSSH_KEX_CMD)
-    PKDTESTS_KEX_OPENSSHONLY(emit_testmap, openssh_e256, OPENSSH_KEX_CMD)
     PKDTESTS_CIPHER(emit_testmap, openssh_e256, OPENSSH_CIPHER_CMD)
     PKDTESTS_CIPHER_OPENSSHONLY(emit_testmap, openssh_e256, OPENSSH_CIPHER_CMD)
     PKDTESTS_MAC(emit_testmap, openssh_e256, OPENSSH_MAC_CMD)
@@ -600,18 +653,24 @@ struct {
 
     PKDTESTS_DEFAULT(emit_testmap, openssh_ed, OPENSSH_CMD)
     PKDTESTS_DEFAULT(emit_testmap, openssh_cert_ed, OPENSSH_CERT_CMD)
-    PKDTESTS_DEFAULT_OPENSSHONLY(emit_testmap, openssh_ed, OPENSSH_CMD)
     PKDTESTS_KEX(emit_testmap, openssh_ed, OPENSSH_KEX_CMD)
-    PKDTESTS_KEX_OPENSSHONLY(emit_testmap, openssh_ed, OPENSSH_KEX_CMD)
     PKDTESTS_CIPHER(emit_testmap, openssh_ed, OPENSSH_CIPHER_CMD)
     PKDTESTS_CIPHER_OPENSSHONLY(emit_testmap, openssh_ed, OPENSSH_CIPHER_CMD)
     PKDTESTS_MAC(emit_testmap, openssh_ed, OPENSSH_MAC_CMD)
     PKDTESTS_MAC_OPENSSHONLY(emit_testmap, openssh_ed, OPENSSH_MAC_CMD)
 
     /* Dropbear */
-    PKDTESTS_DEFAULT(emit_testmap, dropbear, DROPBEAR_CMD)
-    PKDTESTS_CIPHER(emit_testmap, dropbear, DROPBEAR_CIPHER_CMD)
-    PKDTESTS_MAC(emit_testmap, dropbear, DROPBEAR_MAC_CMD)
+    PKDTESTS_DEFAULT(emit_testmap, dropbear_rsa, DROPBEAR_CMD)
+    PKDTESTS_CIPHER(emit_testmap, dropbear_rsa, DROPBEAR_CIPHER_CMD)
+    PKDTESTS_MAC(emit_testmap, dropbear_rsa, DROPBEAR_MAC_CMD)
+
+    PKDTESTS_DEFAULT(emit_testmap, dropbear_e256, DROPBEAR_CMD)
+    PKDTESTS_CIPHER(emit_testmap, dropbear_e256, DROPBEAR_CIPHER_CMD)
+    PKDTESTS_MAC(emit_testmap, dropbear_e256, DROPBEAR_MAC_CMD)
+
+    PKDTESTS_DEFAULT(emit_testmap, dropbear_ed, DROPBEAR_CMD)
+    PKDTESTS_CIPHER(emit_testmap, dropbear_ed, DROPBEAR_CIPHER_CMD)
+    PKDTESTS_MAC(emit_testmap, dropbear_ed, DROPBEAR_MAC_CMD)
 
     /* Noop */
     emit_testmap(client, noop, "", setup_noop, teardown)
@@ -634,7 +693,6 @@ static int pkd_run_tests(void) {
         PKDTESTS_DEFAULT(emit_unit_test_comma, openssh_cert_rsa, OPENSSH_CERT_CMD)
         PKDTESTS_DEFAULT_FIPS(emit_unit_test_comma, openssh_sha256_cert_rsa,
                               OPENSSH_SHA256_CERT_CMD)
-        PKDTESTS_DEFAULT_OPENSSHONLY(emit_unit_test_comma, openssh_rsa, OPENSSH_CMD)
         PKDTESTS_KEX(emit_unit_test_comma, openssh_rsa, OPENSSH_KEX_CMD)
         PKDTESTS_CIPHER(emit_unit_test_comma, openssh_rsa, OPENSSH_CIPHER_CMD)
         PKDTESTS_CIPHER_OPENSSHONLY(emit_unit_test_comma, openssh_rsa, OPENSSH_CIPHER_CMD)
@@ -643,7 +701,6 @@ static int pkd_run_tests(void) {
 
         PKDTESTS_DEFAULT(emit_unit_test_comma, openssh_e256, OPENSSH_CMD)
         PKDTESTS_DEFAULT(emit_unit_test_comma, openssh_cert_e256, OPENSSH_CERT_CMD)
-        PKDTESTS_DEFAULT_OPENSSHONLY(emit_unit_test_comma, openssh_e256, OPENSSH_CMD)
         PKDTESTS_KEX(emit_unit_test_comma, openssh_e256, OPENSSH_KEX_CMD)
         PKDTESTS_CIPHER(emit_unit_test_comma, openssh_e256, OPENSSH_CIPHER_CMD)
         PKDTESTS_CIPHER_OPENSSHONLY(emit_unit_test_comma, openssh_e256, OPENSSH_CIPHER_CMD)
@@ -652,7 +709,6 @@ static int pkd_run_tests(void) {
 
         PKDTESTS_DEFAULT(emit_unit_test_comma, openssh_ed, OPENSSH_CMD)
         PKDTESTS_DEFAULT(emit_unit_test_comma, openssh_cert_ed, OPENSSH_CERT_CMD)
-        PKDTESTS_DEFAULT_OPENSSHONLY(emit_unit_test_comma, openssh_ed, OPENSSH_CMD)
         PKDTESTS_KEX(emit_unit_test_comma, openssh_ed, OPENSSH_KEX_CMD)
         PKDTESTS_CIPHER(emit_unit_test_comma, openssh_ed, OPENSSH_CIPHER_CMD)
         PKDTESTS_CIPHER_OPENSSHONLY(emit_unit_test_comma, openssh_ed, OPENSSH_CIPHER_CMD)
@@ -665,9 +721,17 @@ static int pkd_run_tests(void) {
      * through cli (see 'man dbclient')
      */
     const struct CMUnitTest dropbear_tests[] = {
-        PKDTESTS_DEFAULT(emit_unit_test_comma, dropbear, DROPBEAR_CMD)
-        PKDTESTS_CIPHER(emit_unit_test_comma, dropbear, DROPBEAR_CIPHER_CMD)
-        PKDTESTS_MAC(emit_unit_test_comma, dropbear, DROPBEAR_MAC_CMD)
+        PKDTESTS_DEFAULT(emit_unit_test_comma, dropbear_rsa, DROPBEAR_CMD)
+        PKDTESTS_CIPHER(emit_unit_test_comma, dropbear_rsa, DROPBEAR_CIPHER_CMD)
+        PKDTESTS_MAC(emit_unit_test_comma, dropbear_rsa, DROPBEAR_MAC_CMD)
+
+        PKDTESTS_DEFAULT(emit_unit_test_comma, dropbear_e256, DROPBEAR_CMD)
+        PKDTESTS_CIPHER(emit_unit_test_comma, dropbear_e256, DROPBEAR_CIPHER_CMD)
+        PKDTESTS_MAC(emit_unit_test_comma, dropbear_e256, DROPBEAR_MAC_CMD)
+
+        PKDTESTS_DEFAULT(emit_unit_test_comma, dropbear_ed, DROPBEAR_CMD)
+        PKDTESTS_CIPHER(emit_unit_test_comma, dropbear_ed, DROPBEAR_CIPHER_CMD)
+        PKDTESTS_MAC(emit_unit_test_comma, dropbear_ed, DROPBEAR_MAC_CMD)
     };
 
     const struct CMUnitTest openssh_fips_tests[] = {
@@ -712,7 +776,7 @@ static int pkd_run_tests(void) {
     }
 
     if (is_dropbear_client_enabled()) {
-        setup_dropbear_client_rsa_key();
+        setup_dropbear_client_keys();
         if (!ssh_fips_mode()) {
             memcpy(&all_tests[tindex], &dropbear_tests[0], sizeof(dropbear_tests));
             tindex += (sizeof(dropbear_tests) / sizeof(dropbear_tests[0]));
@@ -764,7 +828,7 @@ static int pkd_run_tests(void) {
 
     /* Clean up client keys for each enabled client. */
     if (is_dropbear_client_enabled()) {
-        cleanup_dropbear_client_rsa_key();
+        cleanup_dropbear_client_keys();
     }
 
     if (is_openssh_client_enabled()) {
@@ -985,6 +1049,9 @@ out_finalize:
     if (rc != 0) {
         fprintf(stderr, "ssh_finalize: %d\n", rc);
     }
+#if defined(HAVE_LIBCRYPTO)
+    OPENSSL_cleanup();
+#endif
 out:
     return exit_code;
 }

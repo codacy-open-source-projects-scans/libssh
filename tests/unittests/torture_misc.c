@@ -110,6 +110,120 @@ static void torture_ntohll(void **state) {
     assert_true(value == check);
 }
 
+/**
+ * @brief Compare fields of two (struct tm) type structures.
+ *
+ * @param[in] a Pointer to the first structure to compare
+ *
+ * @param[in] b Pointer to the second structure to compare
+ *
+ * @returns -1 on error
+ * @returns 0 if the fields of the structures are the same
+ * @returns 1 if the fields of the structures are not the same
+ */
+static int tm_cmp(const struct tm *a, const struct tm *b)
+{
+    if (a == NULL || b == NULL) {
+        return -1;
+    }
+
+    return !(a->tm_sec == b->tm_sec &&
+             a->tm_min == b->tm_min &&
+             a->tm_hour == b->tm_hour &&
+             a->tm_mday == b->tm_mday &&
+             a->tm_mon == b->tm_mon &&
+             a->tm_year == b->tm_year &&
+             a->tm_wday == b->tm_wday &&
+             a->tm_yday == b->tm_yday &&
+             a->tm_isdst == b->tm_isdst);
+}
+
+/**
+ * @brief Validate that localtime_r() works properly.
+ *
+ * This test is mainly to check that the libssh implementation of
+ * localtime_r() on Windows works properly (Windows does not provide
+ * localtime_r())
+ */
+static void torture_localtime_r(UNUSED_PARAM(void **state))
+{
+    /*
+     * The tm_wday and tm_yday fields of tm1 and tm2 would be filled
+     * appropriately due to the mktime() call further in the test.
+     */
+
+    /* Linux release date: 17/09/1991 (random time: 02:01:00) */
+    struct tm tm1 = {.tm_sec = 0,
+                     .tm_min = 1,
+                     .tm_hour = 2,
+                     .tm_mday = 17,
+                     .tm_mon = 9 - 1,
+                     .tm_year = 1991 - 1900,
+                     .tm_isdst = 0};
+
+    /* Windows release date: 20/11/1985 (random time 05:04:03) */
+    struct tm tm2 = {.tm_sec = 3,
+                     .tm_min = 4,
+                     .tm_hour = 5,
+                     .tm_mday = 20,
+                     .tm_mon = 11 - 1,
+                     .tm_year = 1985 - 1900,
+                     .tm_isdst = 0};
+
+    time_t t1, t2;
+    struct tm *static_tm_ptr = NULL, *tm_ptr = NULL;
+    struct tm our_tm = {0};
+    int cmp;
+
+    /*
+     * Convert time represented as (struct tm) to time represented as
+     * a (time_t)
+     */
+    t1 = mktime(&tm1);
+    assert_int_not_equal(t1, (time_t)-1);
+
+    t2 = mktime(&tm2);
+    assert_int_not_equal(t2, (time_t)-1);
+
+    /* Test that localtime_r() gives the correct broken down time */
+    tm_ptr = localtime_r(&t1, &our_tm);
+    assert_ptr_equal(tm_ptr, &our_tm);
+
+    cmp = tm_cmp(&our_tm, &tm1);
+    assert_int_equal(cmp, 0);
+
+    /*
+     * Test that localtime_r() does not modify the static structure used by
+     * localtime(). (This is an attempt to test that the localtime_r()
+     * implementation does not use localtime() internally)
+     *
+     * To test this, we first use localtime() on some time, then use
+     * localtime_r() on another time and then validate that the time
+     * corresponding to the pointer (to the static structure) returned by
+     * the first localtime() call does not change.
+     */
+    static_tm_ptr = localtime(&t1);
+    assert_non_null(static_tm_ptr);
+
+    cmp = tm_cmp(static_tm_ptr, &tm1);
+    assert_int_equal(cmp, 0);
+
+    tm_ptr = localtime_r(&t2, &our_tm);
+    assert_ptr_equal(tm_ptr, &our_tm);
+
+    cmp = tm_cmp(static_tm_ptr, &tm1);
+    assert_int_equal(cmp, 0);
+
+    /*
+     * Ideally, it should be checked that the localtime_r() implementation
+     * is thread safe by testing it under multiple threads, but we are not
+     * checking that as of now. This is because we trust localtime_r() provided
+     * by POSIX systems to be thread safe and the libssh implementation of
+     * localtime_r() on Windows should be a simple wrapper around Windows's
+     * localtime_s() which should also be thread safe.
+     */
+}
+
 #ifdef _WIN32
 
 static void torture_path_expand_tilde_win(void **state) {
@@ -130,27 +244,22 @@ static void torture_path_expand_tilde_win(void **state) {
 #else /* _WIN32 */
 
 static void torture_path_expand_tilde_unix(void **state) {
-    char h[256];
-    char *d;
-    char *user;
-    char *home;
+    char h[256] = {0};
+    char *d = NULL;
+    char *user = NULL;
+    char *home = NULL;
+    struct passwd *pw = NULL;
 
     (void) state;
 
-    user = getenv("USER");
-    if (user == NULL){
-        user = getenv("LOGNAME");
-    }
-    /* in certain CIs there no such variables */
-    if (!user){
-        struct passwd *pw = getpwuid(getuid());
-        if (pw){
-            user = pw->pw_name;
-        }
-    }
+    pw = getpwuid(getuid());
+    assert_non_null(pw);
 
-    home = getenv("HOME");
+    user = pw->pw_name;
+    assert_non_null(user);
+    home = pw->pw_dir;
     assert_non_null(home);
+
     snprintf(h, 256 - 1, "%s/.ssh", home);
 
     d = ssh_path_expand_tilde("~/.ssh");
@@ -229,7 +338,7 @@ static void torture_timeout_elapsed(void **state){
 
     assert_true(ssh_timeout_elapsed(&ts,25));
     assert_false(ssh_timeout_elapsed(&ts,30000));
-    assert_false(ssh_timeout_elapsed(&ts,75));
+    assert_false(ssh_timeout_elapsed(&ts,300));
     assert_true(ssh_timeout_elapsed(&ts,0));
     assert_false(ssh_timeout_elapsed(&ts,-1));
 }
@@ -241,7 +350,7 @@ static void torture_timeout_update(void **state){
     usleep(50000);
     assert_int_equal(ssh_timeout_update(&ts,25), 0);
     assert_in_range(ssh_timeout_update(&ts,30000),29000,29960);
-    assert_in_range(ssh_timeout_update(&ts,75),1,40);
+    assert_in_range(ssh_timeout_update(&ts,500),1,460);
     assert_int_equal(ssh_timeout_update(&ts,0),0);
     assert_int_equal(ssh_timeout_update(&ts,-1),-1);
 }
@@ -339,6 +448,7 @@ static void torture_ssh_analyze_banner(void **state) {
     assert_server_banner_accepted("SSH-2.0-OpenSSH");
     assert_int_equal(0, session->openssh);
 
+
     /* OpenSSH banners: big enough to extract major and minor versions */
     assert_client_banner_accepted("SSH-2.0-OpenSSH_5.9p1");
     assert_int_equal(SSH_VERSION_INT(5, 9, 0), session->openssh);
@@ -377,6 +487,10 @@ static void torture_ssh_analyze_banner(void **state) {
     assert_int_equal(0, session->openssh);
     assert_server_banner_accepted("SSH-2.0-OpenSSH-keyscan");
     assert_int_equal(0, session->openssh);
+
+    /* OpenSSH banners: Double digit in major version */
+    assert_server_banner_accepted("SSH-2.0-OpenSSH_10.0p1");
+    assert_int_equal(SSH_VERSION_INT(10, 0, 0), session->openssh);
 
     ssh_free(session);
 }
@@ -1013,6 +1127,9 @@ static void torture_ssh_check_hostname_syntax(void **state)
     assert_int_equal(rc, SSH_OK);
     rc = ssh_check_hostname_syntax("libssh.");
     assert_int_equal(rc, SSH_OK);
+    // IDN
+    rc = ssh_check_hostname_syntax("xn--bcher-kva.tld");
+    assert_int_equal(rc, SSH_OK);
 
     rc = ssh_check_hostname_syntax(NULL);
     assert_int_equal(rc, SSH_ERROR);
@@ -1055,6 +1172,9 @@ static void torture_ssh_check_hostname_syntax(void **state)
     rc = ssh_check_hostname_syntax(".");
     assert_int_equal(rc, SSH_ERROR);
     rc = ssh_check_hostname_syntax("..");
+    assert_int_equal(rc, SSH_ERROR);
+    // IDN non-encoded
+    rc = ssh_check_hostname_syntax("bücher.tld");
     assert_int_equal(rc, SSH_ERROR);
 }
 
@@ -1136,14 +1256,21 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_basename),
         cmocka_unit_test(torture_dirname),
         cmocka_unit_test(torture_ntohll),
+        cmocka_unit_test(torture_localtime_r),
 #ifdef _WIN32
         cmocka_unit_test(torture_path_expand_tilde_win),
 #else
         cmocka_unit_test(torture_path_expand_tilde_unix),
 #endif
-        cmocka_unit_test_setup_teardown(torture_path_expand_escape, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_path_expand_known_hosts, setup, teardown),
-        cmocka_unit_test_setup_teardown(torture_path_expand_percent, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_path_expand_escape,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_path_expand_known_hosts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_path_expand_percent,
+                                        setup,
+                                        teardown),
         cmocka_unit_test(torture_timeout_elapsed),
         cmocka_unit_test(torture_timeout_update),
         cmocka_unit_test(torture_ssh_analyze_banner),

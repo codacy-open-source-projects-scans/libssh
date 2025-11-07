@@ -155,7 +155,7 @@ static int pki_private_key_decrypt(ssh_string blob,
     }
     rc = ssh_buffer_add_data(buffer,
                              ssh_string_data(kdfoptions),
-                             ssh_string_len(kdfoptions));
+                             (uint32_t)ssh_string_len(kdfoptions));
     if (rc != SSH_ERROR){
         rc = ssh_buffer_unpack(buffer, "Sd", &salt, &rounds);
     }
@@ -234,12 +234,12 @@ ssh_pki_openssh_import(const char *text_key,
                        bool private)
 {
     const char *ptr = text_key;
-    const char *end;
-    char *base64;
+    const char *end = NULL;
+    char *base64 = NULL;
     int cmp;
     int rc;
     int i;
-    ssh_buffer buffer = NULL, privkey_buffer=NULL;
+    ssh_buffer buffer = NULL, privkey_buffer = NULL;
     char *magic = NULL, *ciphername = NULL, *kdfname = NULL;
     uint32_t nkeys = 0, checkint1 = 0, checkint2 = 0xFFFF;
     ssh_string kdfoptions = NULL;
@@ -339,7 +339,7 @@ ssh_pki_openssh_import(const char *text_key,
     ssh_buffer_set_secure(privkey_buffer);
     ssh_buffer_add_data(privkey_buffer,
                         ssh_string_data(privkeys),
-                        ssh_string_len(privkeys));
+                        (uint32_t)ssh_string_len(privkeys));
 
     rc = ssh_buffer_unpack(privkey_buffer, "dd", &checkint1, &checkint2);
     if (rc == SSH_ERROR || checkint1 != checkint2) {
@@ -507,14 +507,14 @@ ssh_string ssh_pki_openssh_privkey_export(const ssh_key privkey,
 {
     ssh_buffer buffer = NULL;
     ssh_string str = NULL, blob = NULL;
-    ssh_string pubkey_s=NULL;
+    ssh_string pubkey_s = NULL;
     ssh_buffer privkey_buffer = NULL;
     uint32_t rnd;
     uint32_t rounds = 16;
-    ssh_string salt=NULL;
-    ssh_string kdf_options=NULL;
+    ssh_string salt = NULL;
+    ssh_string kdf_options = NULL;
     int to_encrypt=0;
-    unsigned char *b64;
+    unsigned char *b64 = NULL;
     uint32_t str_len, len;
     uint8_t padding = 1;
     int ok;
@@ -552,7 +552,8 @@ ssh_string ssh_pki_openssh_privkey_export(const ssh_key privkey,
                          "ddPs",
                          rnd, /* checkint 1 & 2 */
                          rnd,
-                         ssh_string_len(blob), ssh_string_data(blob),
+                         ssh_string_len(blob),
+                         ssh_string_data(blob),
                          "" /* comment */);
     if (rc == SSH_ERROR){
         goto error;
@@ -621,15 +622,17 @@ ssh_string ssh_pki_openssh_privkey_export(const ssh_key privkey,
 
     rc = ssh_buffer_pack(buffer,
                          "PssSdSdP",
-                         (size_t)strlen(OPENSSH_AUTH_MAGIC) + 1, OPENSSH_AUTH_MAGIC,
+                         strlen(OPENSSH_AUTH_MAGIC) + 1,
+                         OPENSSH_AUTH_MAGIC,
                          to_encrypt ? "aes128-cbc" : "none", /* ciphername */
-                         to_encrypt ? "bcrypt" : "none", /* kdfname */
-                         kdf_options, /* kdfoptions */
-                         (uint32_t) 1, /* nkeys */
+                         to_encrypt ? "bcrypt" : "none",     /* kdfname */
+                         kdf_options,                        /* kdfoptions */
+                         (uint32_t)1,                        /* nkeys */
                          pubkey_s,
-                         (uint32_t)ssh_buffer_get_len(privkey_buffer),
+                         ssh_buffer_get_len(privkey_buffer),
                          /* rest of buffer is a string */
-                         (size_t)ssh_buffer_get_len(privkey_buffer), ssh_buffer_get(privkey_buffer));
+                         (size_t)ssh_buffer_get_len(privkey_buffer),
+                         ssh_buffer_get(privkey_buffer));
     if (rc != SSH_OK) {
         goto error;
     }

@@ -31,13 +31,14 @@
 #else
 #include <winsock2.h>
 #endif
-#include <sys/types.h>
+#include "libssh/config_parser.h"
+#include "libssh/misc.h"
+#include "libssh/options.h"
+#include "libssh/pki.h"
 #include "libssh/pki_priv.h"
 #include "libssh/priv.h"
 #include "libssh/session.h"
-#include "libssh/misc.h"
-#include "libssh/options.h"
-#include "libssh/config_parser.h"
+#include <sys/types.h>
 #ifdef WITH_SERVER
 #include "libssh/server.h"
 #include "libssh/bind.h"
@@ -67,7 +68,7 @@
  */
 int ssh_options_copy(ssh_session src, ssh_session *dest)
 {
-    ssh_session new;
+    ssh_session new = NULL;
     struct ssh_iterator *it = NULL;
     struct ssh_list *list = NULL;
     char *id = NULL;
@@ -311,7 +312,14 @@ int ssh_options_set_algo(ssh_session session,
  *              following:
  *
  *              - SSH_OPTIONS_HOST:
- *                The hostname or ip address to connect to (const char *).
+ *                The hostname or ip address to connect to. It can be also in
+ *                the format of URI, containing also username, such as
+ *                [username@]hostname. The IPv6 addresses can be enclosed
+ *                within square braces, for example [::1]. The IPv4 address
+ *                supports any format supported by OS. The hostname needs to be
+ *                encoded to match RFC1035, so for IDN it needs to be encoded
+ *                in punycode.
+ *                (const char *).
  *
  *              - SSH_OPTIONS_PORT:
  *                The port to connect to (unsigned int).
@@ -585,10 +593,10 @@ int ssh_options_set_algo(ssh_session session,
  *              - SSH_OPTIONS_RSA_MIN_SIZE
  *                Set the minimum RSA key size in bits to be accepted by the
  *                client for both authentication and hostkey verification.
- *                The values under 768 bits are not accepted even with this
+ *                The values under 1024 bits are not accepted even with this
  *                configuration option as they are considered completely broken.
  *                Setting 0 will revert the value to defaults.
- *                Default is 1024 bits or 2048 bits in FIPS mode.
+ *                Default is 3072 bits or 2048 bits in FIPS mode.
  *                (int)
 
  *              - SSH_OPTIONS_IDENTITY_AGENT
@@ -645,8 +653,8 @@ int ssh_options_set_algo(ssh_session session,
 int ssh_options_set(ssh_session session, enum ssh_options_e type,
                     const void *value)
 {
-    const char *v;
-    char *p, *q;
+    const char *v = NULL;
+    char *p = NULL, *q = NULL;
     long int i;
     unsigned int u;
     int rc;
@@ -1281,11 +1289,13 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
 
                 /* (*x == 0) is allowed as it is used to revert to default */
 
-                if (*x > 0 && *x < 768) {
-                    ssh_set_error(session, SSH_REQUEST_DENIED,
+                if (*x > 0 && *x < RSA_MIN_KEY_SIZE) {
+                    ssh_set_error(session,
+                                  SSH_REQUEST_DENIED,
                                   "The provided value (%d) for minimal RSA key "
-                                  "size is too small. Use at least 768 bits.",
-                                  *x);
+                                  "size is too small. Use at least %d bits.",
+                                  *x,
+                                  RSA_MIN_KEY_SIZE);
                     return -1;
                 }
                 session->opts.rsa_min_size = *x;
@@ -1510,7 +1520,7 @@ int ssh_options_get_port(ssh_session session, unsigned int* port_target) {
  */
 int ssh_options_get(ssh_session session, enum ssh_options_e type, char** value)
 {
-    char* src = NULL;
+    char *src = NULL;
 
     if (session == NULL) {
         return SSH_ERROR;
@@ -1532,7 +1542,7 @@ int ssh_options_get(ssh_session session, enum ssh_options_e type, char** value)
             break;
 
         case SSH_OPTIONS_IDENTITY: {
-            struct ssh_iterator *it;
+            struct ssh_iterator *it = NULL;
             it = ssh_list_get_iterator(session->opts.identity);
             if (it == NULL) {
                 it = ssh_list_get_iterator(session->opts.identity_non_exp);
@@ -1807,6 +1817,8 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv)
  *
  * @param  filename     The options file to use, if NULL the default
  *                      ~/.ssh/config and /etc/ssh/ssh_config will be used.
+ *                      If complied with support for hermetic-usr,
+ *                      /usr/etc/ssh/ssh_config will be used last.
  *
  * @return 0 on success, < 0 on error.
  *
@@ -1814,53 +1826,68 @@ int ssh_options_getopt(ssh_session session, int *argcptr, char **argv)
  */
 int ssh_options_parse_config(ssh_session session, const char *filename)
 {
-  char *expanded_filename;
-  int r;
+    char *expanded_filename = NULL;
+    int r;
+    FILE *fp = NULL;
 
-  if (session == NULL) {
-    return -1;
-  }
-  if (session->opts.host == NULL) {
-    ssh_set_error_invalid(session);
-    return -1;
-  }
+    if (session == NULL) {
+        return -1;
+    }
+    if (session->opts.host == NULL) {
+        ssh_set_error_invalid(session);
+        return -1;
+    }
 
-  if (session->opts.sshdir == NULL) {
-      r = ssh_options_set(session, SSH_OPTIONS_SSH_DIR, NULL);
-      if (r < 0) {
-          ssh_set_error_oom(session);
-          return -1;
-      }
-  }
+    if (session->opts.sshdir == NULL) {
+        r = ssh_options_set(session, SSH_OPTIONS_SSH_DIR, NULL);
+        if (r < 0) {
+            ssh_set_error_oom(session);
+            return -1;
+        }
+    }
 
-  /* set default filename */
-  if (filename == NULL) {
-    expanded_filename = ssh_path_expand_escape(session, "%d/config");
-  } else {
-    expanded_filename = ssh_path_expand_escape(session, filename);
-  }
-  if (expanded_filename == NULL) {
-    return -1;
-  }
+    /* set default filename */
+    if (filename == NULL) {
+        expanded_filename = ssh_path_expand_escape(session, "%d/config");
+    } else {
+        expanded_filename = ssh_path_expand_escape(session, filename);
+    }
+    if (expanded_filename == NULL) {
+        return -1;
+    }
 
-  r = ssh_config_parse_file(session, expanded_filename);
-  if (r < 0) {
-      goto out;
-  }
-  if (filename == NULL) {
-      r = ssh_config_parse_file(session, GLOBAL_CLIENT_CONFIG);
-  }
+    r = ssh_config_parse_file(session, expanded_filename);
+    if (r < 0) {
+        goto out;
+    }
+    if (filename == NULL) {
+        if ((fp = fopen(GLOBAL_CLIENT_CONFIG, "r")) != NULL) {
+            filename = GLOBAL_CLIENT_CONFIG;
+#ifdef USR_GLOBAL_CLIENT_CONFIG
+        } else if ((fp = fopen(USR_GLOBAL_CLIENT_CONFIG, "r")) != NULL) {
+            filename = USR_GLOBAL_CLIENT_CONFIG;
+#endif
+        }
 
-  /* Do not process the default configuration as part of connection again */
-  session->opts.config_processed = true;
+        if (fp) {
+            SSH_LOG(SSH_LOG_PACKET,
+                    "Reading configuration data from %s",
+                    filename);
+            r = ssh_config_parse(session, fp, true);
+            fclose(fp);
+        }
+    }
+
+    /* Do not process the default configuration as part of connection again */
+    session->opts.config_processed = true;
 out:
-  free(expanded_filename);
-  return r;
+    free(expanded_filename);
+    return r;
 }
 
 int ssh_options_apply(ssh_session session)
 {
-    char *tmp;
+    char *tmp = NULL;
     int rc;
 
     if (session->opts.sshdir == NULL) {
@@ -1961,10 +1988,10 @@ int ssh_options_apply(ssh_session session)
              * it with ssh expansion of ssh escape characters.
              */
             tmp = ssh_path_expand_escape(session, id);
+            free(id);
             if (tmp == NULL) {
                 return -1;
             }
-            free(id);
         }
 
         /* use append to keep the order at first call and use prepend
@@ -1975,6 +2002,7 @@ int ssh_options_apply(ssh_session session)
             rc = ssh_list_append(session->opts.identity, tmp);
         }
         if (rc != SSH_OK) {
+            free(tmp);
             return -1;
         }
     }
@@ -1986,13 +2014,14 @@ int ssh_options_apply(ssh_session session)
         char *id = tmp;
 
         tmp = ssh_path_expand_escape(session, id);
+        free(id);
         if (tmp == NULL) {
             return -1;
         }
-        free(id);
 
         rc = ssh_list_append(session->opts.certificate, tmp);
         if (rc != SSH_OK) {
+            free(tmp);
             return -1;
         }
     }
@@ -2172,11 +2201,11 @@ static int ssh_bind_set_algo(ssh_bind sshbind,
  *                      - SSH_BIND_OPTIONS_RSA_MIN_SIZE
  *                        Set the minimum RSA key size in bits to be accepted by
  *                        the server for both authentication and hostkey
- *                        operations. The values under 768 bits are not accepted
+ *                        operations. The values under 1024 bits are not accepted
  *                        even with this configuration option as they are
  *                        considered completely broken. Setting 0 will revert
  *                        the value to defaults.
- *                        Default is 1024 bits or 2048 bits in FIPS mode.
+ *                        Default is 3072 bits or 2048 bits in FIPS mode.
  *                        (int)
  *
  *
@@ -2209,8 +2238,8 @@ ssh_bind_options_set(ssh_bind sshbind,
                      const void *value)
 {
     bool allowed;
-    char *p, *q;
-    const char *v;
+    char *p = NULL, *q = NULL;
+    const char *v = NULL;
     int i, rc;
     char **wanted_methods = sshbind->wanted_methods;
 
@@ -2261,6 +2290,9 @@ ssh_bind_options_set(ssh_bind sshbind,
                               SSH_FATAL,
                               "The host key size %d is too small.",
                               ssh_key_size(key));
+                if (type != SSH_BIND_OPTIONS_IMPORT_KEY) {
+                    SSH_KEY_FREE(key);
+                }
                 return -1;
             }
             key_type = ssh_key_type(key);
@@ -2303,6 +2335,11 @@ ssh_bind_options_set(ssh_bind sshbind,
                    need it in case some other function wants it */
                 rc = ssh_bind_set_key(sshbind, bind_key_path_loc, value);
                 if (rc < 0) {
+                    ssh_key_free(key);
+                    return -1;
+                }
+            } else if (type == SSH_BIND_OPTIONS_IMPORT_KEY_STR) {
+                if (bind_key_loc == NULL) {
                     ssh_key_free(key);
                     return -1;
                 }
@@ -2556,12 +2593,13 @@ ssh_bind_options_set(ssh_bind sshbind,
 
             /* (*x == 0) is allowed as it is used to revert to default */
 
-            if (*x > 0 && *x < 768) {
+            if (*x > 0 && *x < RSA_MIN_KEY_SIZE) {
                 ssh_set_error(sshbind,
                               SSH_REQUEST_DENIED,
                               "The provided value (%d) for minimal RSA key "
-                              "size is too small. Use at least 768 bits.",
-                              *x);
+                              "size is too small. Use at least %d bits.",
+                              *x,
+                              RSA_MIN_KEY_SIZE);
                 return -1;
             }
             sshbind->rsa_min_size = *x;
@@ -2584,7 +2622,7 @@ static char *ssh_bind_options_expand_escape(ssh_bind sshbind, const char *s)
     char *buf = NULL;
     char *r = NULL;
     char *x = NULL;
-    const char *p;
+    const char *p = NULL;
     size_t i, l;
 
     r = ssh_path_expand_tilde(s);
@@ -2690,7 +2728,7 @@ static char *ssh_bind_options_expand_escape(ssh_bind sshbind, const char *s)
 int ssh_bind_options_parse_config(ssh_bind sshbind, const char *filename)
 {
     int rc = 0;
-    char *expanded_filename;
+    char *expanded_filename = NULL;
 
     if (sshbind == NULL) {
         return -1;
@@ -2699,7 +2737,13 @@ int ssh_bind_options_parse_config(ssh_bind sshbind, const char *filename)
     /* If the global default configuration hasn't been processed yet, process it
      * before the provided configuration. */
     if (!(sshbind->config_processed)) {
-        rc = ssh_bind_config_parse_file(sshbind, GLOBAL_BIND_CONFIG);
+        if (ssh_file_readaccess_ok(GLOBAL_BIND_CONFIG)) {
+            rc = ssh_bind_config_parse_file(sshbind, GLOBAL_BIND_CONFIG);
+#ifdef USR_GLOBAL_BIND_CONFIG
+        } else {
+            rc = ssh_bind_config_parse_file(sshbind, USR_GLOBAL_BIND_CONFIG);
+#endif
+        }
         if (rc != 0) {
             return rc;
         }

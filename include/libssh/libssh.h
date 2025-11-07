@@ -1,7 +1,7 @@
 /*
  * This file is part of the SSH Library
  *
- * Copyright (c) 2003-2024 by Aris Adamantiadis and the libssh team
+ * Copyright (c) 2003-2025 by Aris Adamantiadis and the libssh team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -49,9 +49,10 @@
   #endif
 #endif
 
-#include <stdarg.h>
-#include <stdint.h>
 #include <inttypes.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef _MSC_VER
   typedef int mode_t;
@@ -843,6 +844,7 @@ LIBSSH_API int ssh_string_fill(ssh_string str, const void *data, size_t len);
     do { if ((x) != NULL) { ssh_string_free(x); x = NULL; } } while(0)
 LIBSSH_API void ssh_string_free(ssh_string str);
 LIBSSH_API ssh_string ssh_string_from_char(const char *what);
+LIBSSH_API ssh_string ssh_string_from_data(const void *data, size_t len);
 LIBSSH_API size_t ssh_string_len(ssh_string str);
 LIBSSH_API ssh_string ssh_string_new(size_t size);
 LIBSSH_API const char *ssh_string_get_char(ssh_string str);
@@ -850,6 +852,7 @@ LIBSSH_API char *ssh_string_to_char(ssh_string str);
 #define SSH_STRING_FREE_CHAR(x) \
     do { if ((x) != NULL) { ssh_string_free_char(x); x = NULL; } } while(0)
 LIBSSH_API void ssh_string_free_char(char *s);
+LIBSSH_API int ssh_string_cmp(ssh_string s1, ssh_string s2);
 
 LIBSSH_API int ssh_getpass(const char *prompt, char *buf, size_t len, int echo,
     int verify);
@@ -874,6 +877,7 @@ LIBSSH_API const char* ssh_get_cipher_in(ssh_session session);
 LIBSSH_API const char* ssh_get_cipher_out(ssh_session session);
 LIBSSH_API const char* ssh_get_hmac_in(ssh_session session);
 LIBSSH_API const char* ssh_get_hmac_out(ssh_session session);
+LIBSSH_API const char *ssh_get_supported_methods(enum ssh_kex_types_e type);
 
 LIBSSH_API ssh_buffer ssh_buffer_new(void);
 LIBSSH_API void ssh_buffer_free(ssh_buffer buffer);
@@ -885,6 +889,27 @@ LIBSSH_API uint32_t ssh_buffer_get_data(ssh_buffer buffer, void *data, uint32_t 
 LIBSSH_API void *ssh_buffer_get(ssh_buffer buffer);
 LIBSSH_API uint32_t ssh_buffer_get_len(ssh_buffer buffer);
 LIBSSH_API int ssh_session_set_disconnect_message(ssh_session session, const char *message);
+
+/* SSHSIG hashes data independently from the key used, so we use a new enum
+   to avoid confusion. See
+   https://gitlab.com/jas/ietf-sshsig-format/-/blob/cc70a225cbd695d5a6f20aaebdb4b92b0818e43a/ietf-sshsig-format.md#L137
+ */
+enum sshsig_digest_e {
+    SSHSIG_DIGEST_SHA2_256 = 0,
+    SSHSIG_DIGEST_SHA2_512 = 1,
+};
+
+LIBSSH_API int sshsig_sign(const void *data,
+                           size_t data_length,
+                           ssh_key privkey,
+                           const char *sig_namespace,
+                           enum sshsig_digest_e hash_alg,
+                           char **signature);
+LIBSSH_API int sshsig_verify(const void *data,
+                             size_t data_length,
+                             const char *signature,
+                             const char *sig_namespace,
+                             ssh_key *sign_key);
 
 #ifndef LIBSSH_LEGACY_0_4
 #include "libssh/legacy.h"

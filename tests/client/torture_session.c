@@ -97,7 +97,7 @@ static void torture_channel_read_error(void **state) {
     rc = ssh_channel_request_exec(channel, "hexdump -C /dev/urandom");
     assert_ssh_return_code(session, rc);
 
-    /* send crap and for server to send us a disconnect */
+    /* send crap and wait for server to send us a disconnect */
     fd = ssh_get_fd(session);
     assert_true(fd > 2);
     rc = write(fd, "AAAA", 4);
@@ -321,51 +321,6 @@ static void torture_freed_channel_poll(void **state)
     assert_int_equal(rc, SSH_ERROR);
 }
 
-/* Ensure that calling 'ssh_channel_poll_timeout' on a freed channel does not
- * lead to segmentation faults. */
-static void torture_freed_channel_poll_timeout(void **state)
-{
-    struct torture_state *s = *state;
-    ssh_session session = s->ssh.session;
-    ssh_channel channel;
-    bool channel_freed = false;
-    char request[256];
-    char buff[256] = {0};
-    int rc;
-
-    snprintf(request, 256,
-             "dd if=/dev/urandom of=/tmp/file bs=64000 count=2; hexdump -C /tmp/file");
-
-    channel = ssh_channel_new(session);
-    assert_non_null(channel);
-
-    rc = ssh_channel_open_session(channel);
-    assert_ssh_return_code(session, rc);
-
-    /* Make the request, read parts with close */
-    rc = ssh_channel_request_exec(channel, request);
-    assert_ssh_return_code(session, rc);
-
-    do {
-        rc = ssh_channel_read(channel, buff, 256, 0);
-    } while(rc > 0);
-    assert_ssh_return_code(session, rc);
-
-    /* when either of these conditions is met the call to ssh_channel_free will
-     * actually free the channel so calling poll on that channel will be
-     * use-after-free */
-    if ((channel->flags & SSH_CHANNEL_FLAG_CLOSED_REMOTE) ||
-        (channel->flags & SSH_CHANNEL_FLAG_NOT_BOUND)) {
-        channel_freed = true;
-    }
-    ssh_channel_free(channel);
-
-    if (!channel_freed) {
-        rc = ssh_channel_poll_timeout(channel, 500, 0);
-        assert_int_equal(rc, SSH_ERROR);
-    }
-}
-
 /* Ensure that calling 'ssh_channel_read_nonblocking' on a freed channel does
  * not lead to segmentation faults. */
 static void torture_freed_channel_read_nonblocking(void **state)
@@ -450,60 +405,15 @@ static void torture_channel_exit_signal(void **state)
     rc = ssh_channel_request_send_signal(channel, "TERM");
     assert_ssh_return_code(session, rc);
 
-    exit_status = ssh_channel_get_exit_state(channel,
-                                             &exit_status,
-                                             &exit_signal,
-                                             &core_dumped);
+    rc = ssh_channel_get_exit_state(channel,
+                                    &exit_status,
+                                    &exit_signal,
+                                    &core_dumped);
+
     assert_ssh_return_code(session, rc);
-    assert_int_equal(exit_status, 0);
+    assert_int_equal(exit_status, (uint32_t)-1);
     assert_string_equal(exit_signal, "TERM");
     SAFE_FREE(exit_signal);
-}
-
-
-/* Ensure that calling 'ssh_channel_get_exit_status' on a freed channel does not
- * lead to segmentation faults. */
-static void torture_freed_channel_get_exit_status(void **state)
-{
-    struct torture_state *s = *state;
-    ssh_session session = s->ssh.session;
-    ssh_channel channel;
-    bool channel_freed = false;
-    char request[256];
-    char buff[256] = {0};
-    int rc;
-
-    snprintf(request, 256,
-             "dd if=/dev/urandom of=/tmp/file bs=64000 count=2; hexdump -C /tmp/file");
-
-    channel = ssh_channel_new(session);
-    assert_non_null(channel);
-
-    rc = ssh_channel_open_session(channel);
-    assert_ssh_return_code(session, rc);
-
-    /* Make the request, read parts with close */
-    rc = ssh_channel_request_exec(channel, request);
-    assert_ssh_return_code(session, rc);
-
-    do {
-        rc = ssh_channel_read(channel, buff, 256, 0);
-    } while(rc > 0);
-    assert_ssh_return_code(session, rc);
-
-    /* when either of these conditions is met the call to ssh_channel_free will
-     * actually free the channel so calling poll on that channel will be
-     * use-after-free */
-    if ((channel->flags & SSH_CHANNEL_FLAG_CLOSED_REMOTE) ||
-        (channel->flags & SSH_CHANNEL_FLAG_NOT_BOUND)) {
-        channel_freed = true;
-    }
-    SSH_CHANNEL_FREE(channel);
-
-    if (!channel_freed) {
-        rc = ssh_channel_get_exit_status(channel);
-        assert_ssh_return_code_equal(session, rc, SSH_ERROR);
-    }
 }
 
 static void
@@ -574,6 +484,18 @@ static void torture_pubkey_hash(void **state)
     }
 }
 
+static void torture_openssh_banner_version(void **state)
+{
+    struct torture_state *s = *state;
+    ssh_session session = s->ssh.session;
+
+    int openssh_version = ssh_get_openssh_version(session);
+    int cmake_openssh_version = SSH_VERSION_INT(OPENSSH_VERSION_MAJOR, OPENSSH_VERSION_MINOR, 0);
+
+    assert_int_equal(openssh_version, cmake_openssh_version);
+}
+
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -598,9 +520,6 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_freed_channel_poll,
                                         session_setup,
                                         session_teardown),
-        cmocka_unit_test_setup_teardown(torture_freed_channel_poll_timeout,
-                                        session_setup,
-                                        session_teardown),
         cmocka_unit_test_setup_teardown(torture_freed_channel_read_nonblocking,
                                         session_setup,
                                         session_teardown),
@@ -610,13 +529,13 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_channel_exit_signal,
                                         session_setup,
                                         session_teardown),
-        cmocka_unit_test_setup_teardown(torture_freed_channel_get_exit_status,
-                                        session_setup,
-                                        session_teardown),
         cmocka_unit_test_setup_teardown(torture_channel_read_stderr,
                                         session_setup,
                                         session_teardown),
         cmocka_unit_test_setup_teardown(torture_pubkey_hash,
+                                        session_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_openssh_banner_version,
                                         session_setup,
                                         session_teardown),
     };

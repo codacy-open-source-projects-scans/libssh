@@ -38,10 +38,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef WITH_ZLIB
-#include <zlib.h>
-#endif
-
 #include "libssh/priv.h"
 #include "libssh/session.h"
 #include "libssh/crypto.h"
@@ -52,8 +48,12 @@
 #ifdef WITH_GEX
 #include "libssh/dh-gex.h"
 #endif /* WITH_GEX */
-#include "libssh/ecdh.h"
 #include "libssh/curve25519.h"
+#include "libssh/ecdh.h"
+#include "libssh/sntrup761.h"
+#ifdef HAVE_MLKEM
+#include "libssh/mlkem768.h"
+#endif
 
 static struct ssh_hmac_struct ssh_hmac_tab[] = {
   { "hmac-sha1",                     SSH_HMAC_SHA1,          false },
@@ -152,7 +152,7 @@ static void cipher_free(struct ssh_cipher_struct *cipher) {
 
 struct ssh_crypto_struct *crypto_new(void)
 {
-    struct ssh_crypto_struct *crypto;
+    struct ssh_crypto_struct *crypto = NULL;
 
     crypto = calloc(1, sizeof(struct ssh_crypto_struct));
     if (crypto == NULL) {
@@ -185,9 +185,17 @@ void crypto_free(struct ssh_crypto_struct *crypto)
 #endif /* OPENSSL_VERSION_NUMBER */
 #elif defined HAVE_GCRYPT_ECC
         gcry_sexp_release(crypto->ecdh_privkey);
-#endif
+#elif defined HAVE_LIBMBEDCRYPTO
+        mbedtls_ecp_keypair_free(crypto->ecdh_privkey);
+        SAFE_FREE(crypto->ecdh_privkey);
+#endif /* HAVE_LIBGCRYPT */
         crypto->ecdh_privkey = NULL;
     }
+#endif
+#ifdef HAVE_LIBCRYPTO
+    EVP_PKEY_free(crypto->curve25519_privkey);
+#elif defined(HAVE_GCRYPT_CURVE25519)
+    gcry_sexp_release(crypto->curve25519_privkey);
 #endif
     SAFE_FREE(crypto->dh_server_signature);
     if (crypto->session_id != NULL) {
@@ -198,17 +206,7 @@ void crypto_free(struct ssh_crypto_struct *crypto)
         explicit_bzero(crypto->secret_hash, crypto->digest_len);
         SAFE_FREE(crypto->secret_hash);
     }
-#ifdef WITH_ZLIB
-    if (crypto->compress_out_ctx) {
-        deflateEnd(crypto->compress_out_ctx);
-    }
-    SAFE_FREE(crypto->compress_out_ctx);
-
-    if (crypto->compress_in_ctx) {
-        inflateEnd(crypto->compress_in_ctx);
-    }
-    SAFE_FREE(crypto->compress_in_ctx);
-#endif /* WITH_ZLIB */
+    compress_cleanup(crypto);
     SAFE_FREE(crypto->encryptIV);
     SAFE_FREE(crypto->decryptIV);
     SAFE_FREE(crypto->encryptMAC);
@@ -596,6 +594,17 @@ int crypt_set_algorithms_server(ssh_session session){
     case SSH_KEX_CURVE25519_SHA256:
     case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
         ssh_server_curve25519_init(session);
+        break;
+#endif
+#ifdef HAVE_SNTRUP761
+    case SSH_KEX_SNTRUP761X25519_SHA512:
+    case SSH_KEX_SNTRUP761X25519_SHA512_OPENSSH_COM:
+        ssh_server_sntrup761x25519_init(session);
+        break;
+#endif
+#ifdef HAVE_MLKEM
+    case SSH_KEX_MLKEM768X25519_SHA256:
+        ssh_server_mlkem768x25519_init(session);
         break;
 #endif
     default:

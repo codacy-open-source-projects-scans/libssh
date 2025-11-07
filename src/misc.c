@@ -178,6 +178,35 @@ int ssh_gettimeofday(struct timeval *__p, void *__t)
   return (0);
 }
 
+/**
+ * @internal
+ *
+ * @brief Convert time in seconds since the Epoch to broken-down local time
+ *
+ * This is a helper used to provide localtime_r() like function interface
+ * on Windows.
+ *
+ * @param timer    Pointer to a location storing the time_t which
+ *                 represents the time in seconds since the Epoch.
+ *
+ * @param result   Pointer to a location where the broken-down time
+ *                 (expressed as local time) should be stored.
+ *
+ * @returns        A pointer to the structure pointed to by the parameter
+ *                 <tt>result</tt> on success, NULL on error with the errno
+ *                 set to indicate the error.
+ */
+struct tm *ssh_localtime(const time_t *timer, struct tm *result)
+{
+    errno_t rc;
+    rc = localtime_s(result, timer);
+    if (rc != 0) {
+        return NULL;
+    }
+
+    return result;
+}
+
 char *ssh_get_local_username(void)
 {
     DWORD size = 0;
@@ -401,22 +430,22 @@ int ssh_is_ipaddr(const char *str)
 
 char *ssh_lowercase(const char* str)
 {
-  char *new, *p;
+    char *new = NULL, *p = NULL;
 
-  if (str == NULL) {
-    return NULL;
-  }
+    if (str == NULL) {
+        return NULL;
+    }
 
-  new = strdup(str);
-  if (new == NULL) {
-    return NULL;
-  }
+    new = strdup(str);
+    if (new == NULL) {
+        return NULL;
+    }
 
-  for (p = new; *p; p++) {
-    *p = tolower(*p);
-  }
+    for (p = new; *p; p++) {
+        *p = tolower(*p);
+    }
 
-  return new;
+    return new;
 }
 
 char *ssh_hostport(const char *host, int port)
@@ -455,7 +484,7 @@ char *ssh_hostport(const char *host, int port)
 char *ssh_get_hexa(const unsigned char *what, size_t len)
 {
     const char h[] = "0123456789abcdef";
-    char *hexa;
+    char *hexa = NULL;
     size_t i;
     size_t hlen = len * 3;
 
@@ -725,7 +754,7 @@ struct ssh_list *ssh_list_new(void)
 
 void ssh_list_free(struct ssh_list *list)
 {
-    struct ssh_iterator *ptr, *next;
+    struct ssh_iterator *ptr = NULL, *next = NULL;
     if (!list)
         return;
     ptr = list->root;
@@ -746,7 +775,7 @@ struct ssh_iterator *ssh_list_get_iterator(const struct ssh_list *list)
 
 struct ssh_iterator *ssh_list_find(const struct ssh_list *list, void *value)
 {
-    struct ssh_iterator *it;
+    struct ssh_iterator *it = NULL;
 
     for (it = ssh_list_get_iterator(list); it != NULL ; it = it->next)
         if (it->data == value)
@@ -836,32 +865,32 @@ int ssh_list_prepend(struct ssh_list *list, const void *data)
 
 void ssh_list_remove(struct ssh_list *list, struct ssh_iterator *iterator)
 {
-  struct ssh_iterator *ptr, *prev;
+    struct ssh_iterator *ptr = NULL, *prev = NULL;
 
-  if (list == NULL) {
-      return;
-  }
+    if (list == NULL) {
+        return;
+    }
 
-  prev=NULL;
-  ptr=list->root;
-  while(ptr && ptr != iterator){
-    prev=ptr;
-    ptr=ptr->next;
-  }
-  if(!ptr){
-    /* we did not find the element */
-    return;
-  }
-  /* unlink it */
-  if(prev)
-    prev->next=ptr->next;
-  /* if iterator was the head */
-  if(list->root == iterator)
-    list->root=iterator->next;
-  /* if iterator was the tail */
-  if(list->end == iterator)
-    list->end = prev;
-  SAFE_FREE(iterator);
+    prev = NULL;
+    ptr = list->root;
+    while (ptr && ptr != iterator) {
+        prev = ptr;
+        ptr = ptr->next;
+    }
+    if (!ptr) {
+        /* we did not find the element */
+        return;
+    }
+    /* unlink it */
+    if (prev)
+        prev->next = ptr->next;
+    /* if iterator was the head */
+    if (list->root == iterator)
+        list->root = iterator->next;
+    /* if iterator was the tail */
+    if (list->end == iterator)
+        list->end = prev;
+    SAFE_FREE(iterator);
 }
 
 /**
@@ -977,7 +1006,7 @@ char *ssh_dirname (const char *path)
 char *ssh_basename (const char *path)
 {
   char *new = NULL;
-  const char *s;
+  const char *s = NULL;
   size_t len;
 
   if (path == NULL || *path == '\0') {
@@ -1115,8 +1144,8 @@ int ssh_mkdirs(const char *pathname, mode_t mode)
  */
 char *ssh_path_expand_tilde(const char *d)
 {
-    char *h = NULL, *r;
-    const char *p;
+    char *h = NULL, *r = NULL;
+    const char *p = NULL;
     size_t ld;
     size_t lh = 0;
 
@@ -1131,7 +1160,7 @@ char *ssh_path_expand_tilde(const char *d)
 #ifdef _WIN32
         return strdup(d);
 #else
-        struct passwd *pw;
+        struct passwd *pw = NULL;
         size_t s = p - d;
         char u[128];
 
@@ -1192,7 +1221,7 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
     char *buf = NULL;
     char *r = NULL;
     char *x = NULL;
-    const char *p;
+    const char *p = NULL;
     size_t i, l;
 
     r = ssh_path_expand_tilde(s);
@@ -1345,8 +1374,9 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
  */
 int ssh_analyze_banner(ssh_session session, int server)
 {
-    const char *banner;
-    const char *openssh;
+    const char *banner = NULL;
+    const char *openssh = NULL;
+    const char *ios = NULL;
 
     if (server) {
         banner = session->clientbanner;
@@ -1397,6 +1427,7 @@ int ssh_analyze_banner(ssh_session session, int server)
         char *tmp = NULL;
         unsigned long int major = 0UL;
         unsigned long int minor = 0UL;
+        int off = 0;
 
         /*
          * The banner is typical:
@@ -1416,8 +1447,9 @@ int ssh_analyze_banner(ssh_session session, int server)
             }
 
             errno = 0;
-            minor = strtoul(openssh + 10, &tmp, 10);
-            if ((tmp == (openssh + 10)) ||
+            off = major >= 10 ? 11 : 10;
+            minor = strtoul(openssh + off, &tmp, 10);
+            if ((tmp == (openssh + off)) ||
                 ((errno == ERANGE) && (major == ULONG_MAX)) ||
                 ((errno != 0) && (major == 0)) ||
                 (minor > 100)) {
@@ -1433,6 +1465,11 @@ int ssh_analyze_banner(ssh_session session, int server)
                     server ? "client" : "server",
                     major, minor, session->openssh);
         }
+    }
+    /* Cisco devices have odd scp implementation which breaks */
+    ios = strstr(banner, "Cisco");
+    if (ios != NULL) {
+        session->flags |= SSH_SESSION_FLAG_SCP_QUOTING_BROKEN;
     }
 
 done:
@@ -1587,6 +1624,27 @@ void explicit_bzero(void *s, size_t n)
 #endif
 }
 #endif /* !HAVE_EXPLICIT_BZERO */
+
+/**
+ * @brief Securely free memory by overwriting it before deallocation
+ *
+ * Overwrites the memory region with zeros before calling free() to prevent
+ * sensitive data from remaining in memory after deallocation.
+ *
+ * @param[in] ptr Pointer to the memory region to securely free.
+ *                Can be NULL (no operation performed).
+ * @param[in] len Length of the memory region in bytes.
+ *
+ */
+void burn_free(void *ptr, size_t len)
+{
+    if (ptr == NULL || len == 0) {
+        return;
+    }
+
+    explicit_bzero(ptr, len);
+    free(ptr);
+}
 
 #if !defined(HAVE_STRNDUP)
 char *strndup(const char *s, size_t n)
@@ -1800,7 +1858,7 @@ int ssh_quote_file_name(const char *file_name, char *buf, size_t buf_len)
     /* Put the string terminator */
     *dst = '\0';
 
-    return dst - buf;
+    return (int)(dst - buf);
 
 error:
     return SSH_ERROR;
@@ -1846,7 +1904,7 @@ int ssh_newline_vis(const char *string, char *buf, size_t buf_len)
     }
     *out = '\0';
 
-    return out - buf;
+    return (int)(out - buf);
 }
 
 /**

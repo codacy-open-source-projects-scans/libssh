@@ -404,8 +404,13 @@ done:
  */
 int ssh_dh_init_common(struct ssh_crypto_struct *crypto)
 {
-    struct dh_ctx *ctx;
+    struct dh_ctx *ctx = NULL;
     int rc;
+
+    /* Cleanup any previously allocated dh_ctx */
+    if (crypto->dh_ctx != NULL) {
+        ssh_dh_cleanup(crypto);
+    }
 
     ctx = calloc(1, sizeof(*ctx));
     if (ctx == NULL) {
@@ -592,7 +597,7 @@ int ssh_dh_compute_shared_secret(struct dh_ctx *dh_ctx, int local, int remote,
     }
 #endif /* OPENSSL_VERSION_NUMBER */
 
-    *dest = BN_bin2bn(kstring, klen, NULL);
+    *dest = BN_bin2bn(kstring, (int)klen, NULL);
     if (*dest == NULL) {
         rc = SSH_ERROR;
         goto done;

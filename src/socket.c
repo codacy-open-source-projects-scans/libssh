@@ -202,7 +202,10 @@ void ssh_socket_reset(ssh_socket s)
     s->read_wontblock = 0;
     s->write_wontblock = 0;
     s->data_except = 0;
-    s->poll_handle = NULL;
+    if (s->poll_handle != NULL) {
+        ssh_poll_free(s->poll_handle);
+        s->poll_handle = NULL;
+    }
     s->state=SSH_SOCKET_NONE;
 #ifndef _WIN32
     s->proxy_pid = 0;
@@ -312,7 +315,8 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
         }
 
         /* Rollback the unused space */
-        ssh_buffer_pass_bytes_end(s->in_buffer, MAX_BUF_SIZE - nread);
+        ssh_buffer_pass_bytes_end(s->in_buffer,
+                                  (uint32_t)(MAX_BUF_SIZE - nread));
 
         if (nread == 0) {
             if (p != NULL) {
@@ -337,7 +341,7 @@ int ssh_socket_pollcallback(struct ssh_poll_handle_struct *p,
                 processed = s->callbacks->data(ssh_buffer_get(s->in_buffer),
                                                ssh_buffer_get_len(s->in_buffer),
                                                s->callbacks->userdata);
-                ssh_buffer_pass_bytes(s->in_buffer, processed);
+                ssh_buffer_pass_bytes(s->in_buffer, (uint32_t)processed);
             } while ((processed > 0) && (s->state == SSH_SOCKET_CONNECTED));
 
             /* p may have been freed, so don't use it
@@ -439,7 +443,7 @@ int ssh_socket_unix(ssh_socket s, const char *path)
         ssh_set_error(s->session, SSH_FATAL,
                       "Error from socket(AF_UNIX, SOCK_STREAM, 0): %s",
                       ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
-        return -1;
+        return SSH_ERROR;
     }
 
 #ifndef _WIN32
@@ -448,7 +452,7 @@ int ssh_socket_unix(ssh_socket s, const char *path)
                       "Error from fcntl(fd, F_SETFD, 1): %s",
                       ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
         CLOSE_SOCKET(fd);
-        return -1;
+        return SSH_ERROR;
     }
 #endif
 
@@ -457,10 +461,9 @@ int ssh_socket_unix(ssh_socket s, const char *path)
                       path,
                       ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
         CLOSE_SOCKET(fd);
-        return -1;
+        return SSH_ERROR;
     }
-    ssh_socket_set_fd(s,fd);
-    return 0;
+    return ssh_socket_set_fd(s, fd);
 }
 
 /** \internal
@@ -478,7 +481,7 @@ void ssh_socket_close(ssh_socket s)
 #endif
     }
 
-    if (s->poll_handle != NULL) {
+    if (s->poll_handle != NULL && !ssh_poll_is_locked(s->poll_handle)) {
         ssh_poll_free(s->poll_handle);
         s->poll_handle = NULL;
     }
@@ -518,7 +521,7 @@ void ssh_socket_close(ssh_socket s)
  * @warning this function updates both the input and output
  * file descriptors
  */
-void ssh_socket_set_fd(ssh_socket s, socket_t fd)
+int ssh_socket_set_fd(ssh_socket s, socket_t fd)
 {
     ssh_poll_handle h = NULL;
 
@@ -530,7 +533,7 @@ void ssh_socket_set_fd(ssh_socket s, socket_t fd)
         s->state = SSH_SOCKET_CONNECTING;
         h = ssh_socket_get_poll_handle(s);
         if (h == NULL) {
-            return;
+            return SSH_ERROR;
         }
 
         /* POLLOUT is the event to wait for in a nonblocking connect */
@@ -539,6 +542,7 @@ void ssh_socket_set_fd(ssh_socket s, socket_t fd)
         ssh_poll_add_events(h, POLLWRNORM);
 #endif
     }
+    return SSH_OK;
 }
 
 /** \internal
@@ -742,7 +746,7 @@ int ssh_socket_nonblocking_flush(ssh_socket s)
             return SSH_ERROR;
         }
 
-        ssh_buffer_pass_bytes(s->out_buffer, bwritten);
+        ssh_buffer_pass_bytes(s->out_buffer, (uint32_t)bwritten);
         if (s->session->socket_counter != NULL) {
             s->session->socket_counter->out_bytes += bwritten;
         }
@@ -888,9 +892,7 @@ int ssh_socket_connect(ssh_socket s,
     if (fd == SSH_INVALID_SOCKET) {
         return SSH_ERROR;
     }
-    ssh_socket_set_fd(s,fd);
-
-    return SSH_OK;
+    return ssh_socket_set_fd(s, fd);
 }
 
 #ifdef WITH_EXEC
@@ -984,8 +986,16 @@ ssh_socket_connect_proxycommand(ssh_socket s, const char *command)
     }
     s->proxy_pid = pid;
     close(pair[0]);
-    SSH_LOG(SSH_LOG_DEBUG, "ProxyCommand connection pipe: [%d,%d]",pair[0],pair[1]);
-    ssh_socket_set_fd(s, pair[1]);
+    SSH_LOG(SSH_LOG_DEBUG,
+            "ProxyCommand connection pipe: [%d,%d]",
+            pair[0],
+            pair[1]);
+
+    rc = ssh_socket_set_fd(s, pair[1]);
+    if (rc != SSH_OK) {
+        return rc;
+    }
+
     s->fd_is_socket = 0;
     h = ssh_socket_get_poll_handle(s);
     if (h == NULL) {
@@ -1275,7 +1285,12 @@ ssh_socket_connect_proxyjump(ssh_socket s)
             "ProxyJump connection pipe: [%d,%d]",
             pair[0],
             pair[1]);
-    ssh_socket_set_fd(s, pair[1]);
+
+    rc = ssh_socket_set_fd(s, pair[1]);
+    if (rc != SSH_OK) {
+        return rc;
+    }
+
     s->fd_is_socket = 1;
     h = ssh_socket_get_poll_handle(s);
     if (h == NULL) {

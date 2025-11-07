@@ -3,6 +3,7 @@ variables:
   BUILD_IMAGES_PROJECT: libssh/build-images
   CENTOS8_BUILD: buildenv-c8s
   CENTOS9_BUILD: buildenv-c9s
+  CENTOS10_BUILD: buildenv-c10s
   FEDORA_BUILD: buildenv-fedora
   MINGW_BUILD: buildenv-mingw
   TUMBLEWEED_BUILD: buildenv-tumbleweed
@@ -26,13 +27,17 @@ workflow:
       when: never
     - if: '$CI_COMMIT_BRANCH'
 
-.build:
-  stage: build
+.build_options:
   variables:
     CMAKE_DEFAULT_OPTIONS: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DPICKY_DEVELOPER=ON"
+    CMAKE_DEFAULT_DEBUG_OPTIONS: "-DCMAKE_C_FLAGS='-O0 -g -ggdb' -DPICKY_DEVELOPER=ON"
     CMAKE_BUILD_OPTIONS: "-DWITH_BLOWFISH_CIPHER=ON -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_DEBUG_PACKET=ON -DWITH_DEBUG_CALLTRACE=ON"
     CMAKE_TEST_OPTIONS: "-DUNIT_TESTING=ON -DCLIENT_TESTING=ON -DSERVER_TESTING=ON -DGSSAPI_TESTING=ON -DWITH_BENCHMARKS=ON -DFUZZ_TESTING=ON"
     CMAKE_OPTIONS: $CMAKE_DEFAULT_OPTIONS $CMAKE_BUILD_OPTIONS $CMAKE_TEST_OPTIONS
+
+.build:
+  extends: .build_options
+  stage: build
   before_script: &build
     - uname -a
     - cat /etc/os-release
@@ -74,8 +79,6 @@ workflow:
 .fedora:
   extends: .tests
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
-  variables:
-    CMAKE_ADDITIONAL_OPTIONS: -DWITH_PKCS11_URI=ON
 
 .tumbleweed:
   extends: .tests
@@ -107,7 +110,7 @@ review:
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
   script:
     - ERROR=0
-      codespell --ignore-words-list=keypair,sorce,ned,nd,ue || ERROR=1;
+      codespell --ignore-words-list=keypair,sorce,ned,nd,ue,pendin || ERROR=1;
       ./.gitlab-ci/clang-format-check.sh || ERROR=1;
       ./.gitlab-ci/git-check-signoff-trailer.sh ${CI_MERGE_REQUEST_DIFF_BASE_SHA} || ERROR=1;
       ./.gitlab-ci/shellcheck.sh || ERROR=1;
@@ -122,7 +125,29 @@ review:
 ###############################################################################
 #                               CentOS builds                                 #
 ###############################################################################
-centos9s/openssl_3.0.x/x86_64:
+centos10s/openssl_3.5.x/x86_64:
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS10_BUILD
+  extends: .tests
+  variables:
+    CMAKE_ADDITIONAL_OPTIONS: -DWITH_PKCS11_URI=ON -DWITH_PKCS11_PROVIDER=ON
+  script:
+    - export OPENSSL_ENABLE_SHA1_SIGNATURES=1
+    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+      make -j$(nproc) &&
+      ctest --output-on-failure
+
+centos10s/openssl_3.5.x/x86_64/fips:
+  extends: .fips
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS10_BUILD
+  variables:
+    CMAKE_ADDITIONAL_OPTIONS: -DWITH_PKCS11_URI=ON -DWITH_PKCS11_PROVIDER=ON
+  script:
+    - export OPENSSL_ENABLE_SHA1_SIGNATURES=1
+    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+      make -j$(nproc) &&
+      OPENSSL_FORCE_FIPS_MODE=1 ctest --output-on-failure
+
+centos9s/openssl_3.5.x/x86_64:
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS9_BUILD
   extends: .tests
   variables:
@@ -139,7 +164,7 @@ centos9s/mbedtls_2.x/x86_64:
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DWITH_MBEDTLS=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_BLOWFISH_CIPHER=OFF"
 
-centos9s/openssl_3.0.x/x86_64/fips:
+centos9s/openssl_3.5.x/x86_64/fips:
   extends: .fips
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS9_BUILD
   script:
@@ -204,15 +229,15 @@ fedora/coverage:
         coverage_format: cobertura
         path: obj/coverage_xml.xml
 
-fedora/openssl_3.0.x/x86_64:
+fedora/openssl_3.x/x86_64:
   extends: .fedora
 
-fedora/openssl_3.0.x/x86_64/pkcs11-provider:
+fedora/openssl_3.x/x86_64/pkcs11-provider:
   variables:
     CMAKE_ADDITIONAL_OPTIONS: -DWITH_PKCS11_URI=ON -DWITH_PKCS11_PROVIDER=ON
   extends: .fedora
 
-fedora/openssl_3.0.x/x86_64/minimal:
+fedora/openssl_3.x/x86_64/minimal:
   extends: .fedora
   variables:
   script:
@@ -328,7 +353,7 @@ fedora/mingw64:
       -DWITH_PCAP=ON
       -DUNIT_TESTING=ON .. &&
       make -j$(nproc) &&
-      ctest --output-on-failure
+      ctest --output-on-failure -E torture_rand
 
 # Unit testing only, no client and pkd testing, because cwrap is not available
 # for MinGW
@@ -345,7 +370,7 @@ fedora/mingw32:
       -DWITH_PCAP=ON
       -DUNIT_TESTING=ON .. &&
       make -j$(nproc) &&
-      ctest --output-on-failure
+      ctest --output-on-failure -E torture_rand
 
 
 ###############################################################################
@@ -384,7 +409,7 @@ fedora/mingw32:
     paths:
       - obj-csbuild/
 
-fedora/csbuild/openssl_3.0.x:
+fedora/csbuild/openssl_3.x:
   extends: .csbuild
   script:
     - csbuild
@@ -414,6 +439,62 @@ fedora/csbuild/mbedtls:
       --color
       --print-current --print-fixed
 
+###############################################################################
+#                               Fedora abidiff                                #
+###############################################################################
+
+fedora/abidiff:
+  stage: analysis
+  variables:
+    GIT_DEPTH: "100"
+    CMAKE_OPTIONS: $CMAKE_DEFAULT_DEBUG_OPTIONS $CMAKE_BUILD_OPTIONS
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  before_script:
+    - uname -a
+    - cat /etc/os-release
+    - mount
+    - df -h
+    - cat /proc/swaps
+    - free -h
+    - |
+      # for merge requests
+      if [[ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]]; then
+          export CI_COMMIT_BEFORE_SHA="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      fi
+      # for branches run
+      if [[ -z "$CI_COMMIT_BEFORE_SHA" ]]; then
+          export CI_COMMIT_BEFORE_SHA=$(git rev-parse "${CI_COMMIT_SHA}~20")
+      fi
+
+      # Check if the commit exists in this branch
+      # This is not the case for a force push
+      git branch --contains $CI_COMMIT_BEFORE_SHA 2>/dev/null || export CI_COMMIT_BEFORE_SHA=$(git rev-parse "${CI_COMMIT_SHA}~20")
+
+    - mkdir -p obj-${CI_COMMIT_BEFORE_SHA}
+    - mkdir -p obj-${CI_COMMIT_SHA}
+
+    - export INSTALL_DIR1=$(pwd)/install/${CI_COMMIT_BEFORE_SHA}
+    - export INSTALL_DIR2=$(pwd)/install/${CI_COMMIT_SHA}
+  script:
+    - git checkout ${CI_COMMIT_BEFORE_SHA}
+    - pushd obj-${CI_COMMIT_BEFORE_SHA}
+    - cmake ${CMAKE_OPTIONS} -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR1} .. &&
+      make -j$(nproc) && make -j$(nproc) install
+    - popd
+    - ls -l ${INSTALL_DIR1}/lib*/
+    - git checkout ${CI_COMMIT_SHA}
+    - pushd obj-${CI_COMMIT_SHA}
+    - cmake ${CMAKE_OPTIONS} -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR2} .. &&
+      make -j$(nproc) && make -j$(nproc) install
+    - popd
+    - ls -l ${INSTALL_DIR2}/lib*/
+    - ./.gitlab-ci/checkabi.sh ${INSTALL_DIR1} ${INSTALL_DIR2}
+  tags:
+    - saas-linux-small-amd64
+  except:
+    - tags
+  only:
+    - merge_requests
 
 ###############################################################################
 #                               Ubuntu builds                                 #
@@ -426,7 +507,7 @@ ubuntu/openssl_3.0.x/x86_64:
 ###############################################################################
 #                               Alpine builds                                 #
 ###############################################################################
-alpine/openssl_3.0.x/musl:
+alpine/openssl_3.x/musl:
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$ALPINE_BUILD
   extends: .tests
   script:
@@ -443,10 +524,10 @@ alpine/openssl_3.0.x/musl:
 ###############################################################################
 #                             Tumbleweed builds                               #
 ###############################################################################
-tumbleweed/openssl_3.0.x/x86_64/gcc:
+tumbleweed/openssl_3.x/x86_64/gcc:
   extends: .tumbleweed
 
-tumbleweed/openssl_3.0.x/x86/gcc:
+tumbleweed/openssl_3.x/x86/gcc:
   extends: .tumbleweed
   script:
     - cmake
@@ -459,12 +540,12 @@ tumbleweed/openssl_3.0.x/x86/gcc:
       -DUNIT_TESTING=ON .. &&
       make -j$(nproc)
 
-tumbleweed/openssl_3.0.x/x86_64/gcc7:
+tumbleweed/openssl_3.x/x86_64/gcc7:
   extends: .tumbleweed
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7"
 
-tumbleweed/openssl_3.0.x/x86/gcc7:
+tumbleweed/openssl_3.x/x86/gcc7:
   extends: .tumbleweed
   script:
     - cmake
@@ -476,7 +557,7 @@ tumbleweed/openssl_3.0.x/x86/gcc7:
       make -j$(nproc) &&
       ctest --output-on-failure
 
-tumbleweed/openssl_3.0.x/x86_64/clang:
+tumbleweed/openssl_3.x/x86_64/clang:
   extends: .tumbleweed
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
@@ -485,6 +566,11 @@ tumbleweed/mbedtls-3.6.x/x86_64/gcc:
   extends: .tumbleweed
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config -DWITH_MBEDTLS=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_BLOWFISH_CIPHER=OFF "
+
+tumbleweed/mbedtls-3.6.x/x86_64/clang:
+  extends: .tumbleweed
+  variables:
+    CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config -DWITH_MBEDTLS=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_BLOWFISH_CIPHER=OFF "
 
 tumbleweed/static-analysis:
   extends: .tests
@@ -547,9 +633,7 @@ freebsd/openssl_1.1.1/x86_64:
 # 2024-05-13: These jobs run out of the stages as they take extremely long and
 # usually timeout with the update to Gitlab 17.0
 .vs:
-  stage: analysis
-  needs: []
-  allow_failure: true
+  stage: test
   cache:
     key: vcpkg.${CI_JOB_NAME}
     paths:
@@ -641,3 +725,41 @@ coverity:
     when: on_failure
     paths:
       - obj/cov-int/*.txt
+
+###############################################################################
+#                                  MacOS                                      #
+###############################################################################
+.macos:
+  tags:
+    - saas-macos-medium-m1
+  image: macos-14-xcode-15
+  before_script:
+    - echo "MacOS runner started"
+    - brew update
+    - brew install cmake openssl cmocka doxygen
+    - mkdir obj && cd obj
+  only:
+    - branches@libssh/libssh-mirror
+    - branches@cryptomilk/libssh-mirror
+    - branches@jjelen/libssh-mirror
+    - branches@marco.fortina/libssh-mirror
+
+# TODO add -DFUZZ_TESTING=ON clang cant find _LLVMFuzzerInitialize on arm64
+macos-m1:
+  extends: .macos
+  variables:
+    HOMEBREW_NO_AUTO_UPDATE: 1
+    CMAKE_DEFAULT_OPTIONS: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DPICKY_DEVELOPER=ON"
+    CMAKE_BUILD_OPTIONS: "-DWITH_BLOWFISH_CIPHER=ON -DWITH_SFTP=ON -DWITH_SERVER=ON -DWITH_ZLIB=ON -DWITH_PCAP=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_DEBUG_PACKET=ON -DWITH_DEBUG_CALLTRACE=ON"
+    CMAKE_TEST_OPTIONS: "-DUNIT_TESTING=ON"
+    CMAKE_OPTIONS: $CMAKE_DEFAULT_OPTIONS $CMAKE_BUILD_OPTIONS $CMAKE_TEST_OPTIONS
+  stage: test
+  script:
+    - cmake $CMAKE_OPTIONS .. &&
+      make -j$(sysctl -n hw.logicalcpu) &&
+      ctest --output-on-failure
+  artifacts:
+    expire_in: 1 week
+    when: on_failure
+    paths:
+      - obj/

@@ -72,7 +72,7 @@ static int session_setup(void **state)
     assert_ssh_return_code(s->ssh.session, rc);
 
     /* Enable all hostkeys */
-    all_keytypes = ssh_kex_get_supported_method(SSH_HOSTKEYS);
+    all_keytypes = ssh_get_supported_methods(SSH_HOSTKEYS);
     rc = ssh_options_set(s->ssh.session, SSH_OPTIONS_PUBLICKEY_ACCEPTED_TYPES, all_keytypes);
     assert_ssh_return_code(s->ssh.session, rc);
 
@@ -108,11 +108,8 @@ static int pubkey_setup(void **state)
 static int agent_setup(void **state)
 {
     struct torture_state *s = *state;
-    char ssh_agent_cmd[4096];
-    char ssh_agent_sock[1024];
-    char ssh_agent_pidfile[1024];
-    char ssh_key_add[1024];
     struct passwd *pwd;
+    char ssh_key_path[1024];
     int rc;
 
     rc = pubkey_setup(state);
@@ -123,45 +120,18 @@ static int agent_setup(void **state)
     pwd = getpwnam("bob");
     assert_non_null(pwd);
 
-    snprintf(ssh_agent_sock,
-             sizeof(ssh_agent_sock),
-             "%s/agent.sock",
-             s->socket_dir);
-
-    snprintf(ssh_agent_pidfile,
-             sizeof(ssh_agent_pidfile),
-             "%s/agent.pid",
-             s->socket_dir);
-
-    /* Production ready code!!! */
-    snprintf(ssh_agent_cmd,
-             sizeof(ssh_agent_cmd),
-             "eval `ssh-agent -a %s`; echo $SSH_AGENT_PID > %s",
-             ssh_agent_sock, ssh_agent_pidfile);
-
-    /* run ssh-agent and ssh-add as the normal user */
-    unsetenv("UID_WRAPPER_ROOT");
-
-    rc = system(ssh_agent_cmd);
-    assert_return_code(rc, errno);
-
-    setenv("SSH_AUTH_SOCK", ssh_agent_sock, 1);
-    setenv("TORTURE_SSH_AGENT_PIDFILE", ssh_agent_pidfile, 1);
-
-    snprintf(ssh_key_add,
-             sizeof(ssh_key_add),
-             "ssh-add %s/.ssh/id_rsa",
-             pwd->pw_dir);
-
-    rc = system(ssh_key_add);
-    assert_return_code(rc, errno);
+    /* Use the common function to set up the SSH agent with Bob's key */
+    snprintf(ssh_key_path, sizeof(ssh_key_path), "%s/.ssh/id_rsa", pwd->pw_dir);
+    rc = torture_setup_ssh_agent(s, ssh_key_path);
+    if (rc != 0) {
+        return rc;
+    }
 
     return 0;
 }
 
 static int agent_teardown(void **state)
 {
-    const char *ssh_agent_pidfile;
     int rc;
 
     rc = session_teardown(state);
@@ -169,17 +139,11 @@ static int agent_teardown(void **state)
         return rc;
     }
 
-    ssh_agent_pidfile = getenv("TORTURE_SSH_AGENT_PIDFILE");
-    assert_non_null(ssh_agent_pidfile);
-
-    /* kill agent pid */
-    rc = torture_terminate_process(ssh_agent_pidfile);
-    assert_return_code(rc, errno);
-
-    unlink(ssh_agent_pidfile);
-
-    unsetenv("TORTURE_SSH_AGENT_PIDFILE");
-    unsetenv("SSH_AUTH_SOCK");
+    /* Use the common function to clean up the SSH agent */
+    rc = torture_cleanup_ssh_agent();
+    if (rc != 0) {
+        return rc;
+    }
 
     return 0;
 }
@@ -1247,6 +1211,38 @@ static void torture_auth_pubkey_rsa_key_size_nonblocking(void **state)
     SSH_KEY_FREE(privkey);
 }
 
+static void torture_auth_pubkey_skip_none(void **state)
+{
+    struct torture_state *s = *state;
+    ssh_session session = s->ssh.session;
+    char bob_ssh_key[1024];
+    ssh_key privkey = NULL;
+    struct passwd *pwd = NULL;
+    int rc;
+
+    pwd = getpwnam("bob");
+    assert_non_null(pwd);
+
+    snprintf(bob_ssh_key, sizeof(bob_ssh_key), "%s/.ssh/id_rsa", pwd->pw_dir);
+
+    /* Authenticate as alice with bob his pubkey */
+    rc = ssh_options_set(session, SSH_OPTIONS_USER, TORTURE_SSH_USER_ALICE);
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_connect(session);
+    assert_int_equal(rc, SSH_OK);
+
+    /* Skip the ssh_userauth_none() here */
+
+    rc = ssh_pki_import_privkey_file(bob_ssh_key, NULL, NULL, NULL, &privkey);
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_userauth_publickey(session, NULL, privkey);
+    assert_int_equal(rc, SSH_AUTH_SUCCESS);
+
+    SSH_KEY_FREE(privkey);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -1332,6 +1328,9 @@ int torture_run_tests(void) {
                                         pubkey_setup,
                                         session_teardown),
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_rsa_key_size_nonblocking,
+                                        pubkey_setup,
+                                        session_teardown),
+        cmocka_unit_test_setup_teardown(torture_auth_pubkey_skip_none,
                                         pubkey_setup,
                                         session_teardown),
     };

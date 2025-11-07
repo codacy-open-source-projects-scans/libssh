@@ -153,6 +153,7 @@ static struct ssh_config_keyword_table_s ssh_config_keyword_table[] = {
   { "tunneldevice", SOC_NA},
   { "xauthlocation", SOC_NA},
   { "pubkeyacceptedkeytypes", SOC_PUBKEYACCEPTEDKEYTYPES},
+  { "requiredrsasize", SOC_REQUIRED_RSA_SIZE},
   { NULL, SOC_UNKNOWN }
 };
 
@@ -211,7 +212,7 @@ local_parse_file(ssh_session session,
                  unsigned int depth,
                  bool global)
 {
-    FILE *f;
+    FILE *f = NULL;
     char line[MAX_LINE_SIZE] = {0};
     unsigned int count = 0;
     int rv;
@@ -894,9 +895,11 @@ ssh_config_parse_line(ssh_session session,
                 /* Here we match only one argument */
                 p = ssh_config_get_str_tok(&s, NULL);
                 if (p == NULL || p[0] == '\0') {
-                    ssh_set_error(session, SSH_FATAL,
-                                  "line %d: ERROR - Match user keyword "
-                                  "requires argument", count);
+                    ssh_set_error(session,
+                                  SSH_FATAL,
+                                  "line %d: ERROR - Match localuser keyword "
+                                  "requires argument",
+                                  count);
                     SAFE_FREE(x);
                     return -1;
                 }
@@ -1008,17 +1011,17 @@ ssh_config_parse_line(ssh_session session,
 
             case MATCH_UNKNOWN:
             default:
-                ssh_set_error(session, SSH_FATAL,
-                              "ERROR - Unknown argument '%s' for Match keyword", p);
-                SAFE_FREE(x);
-                return -1;
+                SSH_LOG(SSH_LOG_WARN,
+                        "Unknown argument '%s' for Match keyword. Not matching",
+                        p);
+                result = 0;
+                break;
             }
         } while (p != NULL && p[0] != '\0');
         if (args == 0) {
-            ssh_set_error(session, SSH_FATAL,
-                          "ERROR - Match keyword requires an argument");
-            SAFE_FREE(x);
-            return -1;
+            SSH_LOG(SSH_LOG_WARN,
+                    "ERROR - Match keyword requires an argument. Not matching");
+            result = 0;
         }
         *parsing = result;
         break;
@@ -1437,6 +1440,12 @@ ssh_config_parse_line(ssh_session session,
             ssh_options_set(session, SSH_OPTIONS_CERTIFICATE, p);
         }
         break;
+    case SOC_REQUIRED_RSA_SIZE:
+        l = ssh_config_get_long(&s, -1);
+        if (l >= 0 && *parsing) {
+            ssh_options_set(session, SSH_OPTIONS_RSA_MIN_SIZE, &l);
+        }
+        break;
     default:
       ssh_set_error(session, SSH_FATAL, "ERROR - unimplemented opcode: %d",
               opcode);
@@ -1449,6 +1458,32 @@ ssh_config_parse_line(ssh_session session,
   return 0;
 }
 
+/* @brief Parse configuration from a file pointer
+ *
+ * @params[in] session   The ssh session
+ * @params[in] fp        A valid file pointer
+ * @params[in] global    Whether the config is global or not
+ *
+ * @returns    0 on successful parsing the configuration file, -1 on error
+ */
+int ssh_config_parse(ssh_session session, FILE *fp, bool global)
+{
+    char line[MAX_LINE_SIZE] = {0};
+    unsigned int count = 0;
+    int parsing, rv;
+
+    parsing = 1;
+    while (fgets(line, sizeof(line), fp)) {
+        count++;
+        rv = ssh_config_parse_line(session, line, count, &parsing, 0, global);
+        if (rv < 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 /* @brief Parse configuration file and set the options to the given session
  *
  * @params[in] session   The ssh session
@@ -1458,36 +1493,32 @@ ssh_config_parse_line(ssh_session session,
  */
 int ssh_config_parse_file(ssh_session session, const char *filename)
 {
-    char line[MAX_LINE_SIZE] = {0};
-    unsigned int count = 0;
-    FILE *f;
-    int parsing, rv;
+    FILE *fp = NULL;
+    int rv;
     bool global = 0;
 
-    f = fopen(filename, "r");
-    if (f == NULL) {
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
         return 0;
     }
 
     rv = strcmp(filename, GLOBAL_CLIENT_CONFIG);
+#ifdef USR_GLOBAL_CLIENT_CONFIG
+    if (rv != 0) {
+        rv = strcmp(filename, USR_GLOBAL_CLIENT_CONFIG);
+    }
+#endif
+
     if (rv == 0) {
         global = true;
     }
 
     SSH_LOG(SSH_LOG_PACKET, "Reading configuration data from %s", filename);
 
-    parsing = 1;
-    while (fgets(line, sizeof(line), f)) {
-        count++;
-        rv = ssh_config_parse_line(session, line, count, &parsing, 0, global);
-        if (rv < 0) {
-            fclose(f);
-            return -1;
-        }
-    }
+    rv = ssh_config_parse(session, fp, global);
 
-    fclose(f);
-    return 0;
+    fclose(fp);
+    return rv;
 }
 
 /* @brief Parse configuration string and set the options to the given session
@@ -1502,7 +1533,8 @@ int ssh_config_parse_string(ssh_session session, const char *input)
 {
     char line[MAX_LINE_SIZE] = {0};
     const char *c = input, *line_start = input;
-    unsigned int line_num = 0, line_len;
+    unsigned int line_num = 0;
+    size_t line_len;
     int parsing, rv;
 
     SSH_LOG(SSH_LOG_DEBUG, "Reading configuration data from string:");
@@ -1524,8 +1556,10 @@ int ssh_config_parse_string(ssh_session session, const char *input)
         }
         line_len = c - line_start;
         if (line_len > MAX_LINE_SIZE - 1) {
-            SSH_LOG(SSH_LOG_TRACE, "Line %u too long: %u characters",
-                    line_num, line_len);
+            SSH_LOG(SSH_LOG_TRACE,
+                    "Line %u too long: %zu characters",
+                    line_num,
+                    line_len);
             return SSH_ERROR;
         }
         memcpy(line, line_start, line_len);

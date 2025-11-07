@@ -1,6 +1,7 @@
 set(LIBSSH_PUBLIC_INCLUDE_DIRS ${libssh_SOURCE_DIR}/include)
 
 set(LIBSSH_PRIVATE_INCLUDE_DIRS
+  ${libssh_BINARY_DIR}/include
   ${libssh_BINARY_DIR}
 )
 
@@ -12,27 +13,13 @@ if (TARGET OpenSSL::Crypto)
   list(APPEND LIBSSH_LINK_LIBRARIES OpenSSL::Crypto)
 endif ()
 
-if (MBEDTLS_CRYPTO_LIBRARY)
-    set(LIBSSH_PRIVATE_INCLUDE_DIRS
-      ${LIBSSH_PRIVATE_INCLUDE_DIRS}
-      ${MBEDTLS_INCLUDE_DIR}
-    )
-  set(LIBSSH_LINK_LIBRARIES
-    ${LIBSSH_LINK_LIBRARIES}
-    ${MBEDTLS_CRYPTO_LIBRARY}
-  )
-endif (MBEDTLS_CRYPTO_LIBRARY)
+if (TARGET MbedTLS::mbedcrypto)
+  list(APPEND LIBSSH_LINK_LIBRARIES MbedTLS::mbedcrypto)
+endif ()
 
-if (GCRYPT_LIBRARIES)
-  set(LIBSSH_PRIVATE_INCLUDE_DIRS
-    ${LIBSSH_PRIVATE_INCLUDE_DIRS}
-    ${GCRYPT_INCLUDE_DIR}
-  )
-
-  set(LIBSSH_LINK_LIBRARIES
-    ${LIBSSH_LINK_LIBRARIES}
-    ${GCRYPT_LIBRARIES})
-endif()
+if (TARGET libgcrypt::libgcrypt)
+  list(APPEND LIBSSH_LINK_LIBRARIES ${GCRYPT_LIBRARIES})
+endif ()
 
 if (WITH_ZLIB)
   list(APPEND LIBSSH_LINK_LIBRARIES ZLIB::ZLIB)
@@ -100,10 +87,12 @@ set(libssh_SRCS
   connector.c
   crypto_common.c
   curve25519.c
+  sntrup761.c
   dh.c
   ecdh.c
   error.c
   getpass.c
+  gzip.c
   init.c
   kdf.c
   kex.c
@@ -186,6 +175,13 @@ if (WITH_GCRYPT)
             chachapoly.c
         )
     endif (NOT HAVE_GCRYPT_CHACHA_POLY)
+
+    if (HAVE_GCRYPT_CURVE25519)
+        set(libssh_SRCS
+            ${libssh_SRCS}
+            curve25519_gcrypt.c
+        )
+    endif(HAVE_GCRYPT_CURVE25519)
 elseif (WITH_MBEDTLS)
     set(libssh_SRCS
         ${libssh_SRCS}
@@ -202,6 +198,7 @@ elseif (WITH_MBEDTLS)
         external/fe25519.c
         external/ge25519.c
         external/sc25519.c
+        external/sntrup761.c
        )
     if (NOT (HAVE_MBEDTLS_CHACHA20_H AND HAVE_MBEDTLS_POLY1305_H))
         set(libssh_SRCS
@@ -211,17 +208,24 @@ elseif (WITH_MBEDTLS)
             chachapoly.c
            )
     endif()
-
+    if (HAVE_MBEDTLS_CURVE25519)
+        set(libssh_SRCS
+            ${libssh_SRCS}
+            curve25519_mbedcrypto.c
+        )
+    endif(HAVE_MBEDTLS_CURVE25519)
 else (WITH_GCRYPT)
     set(libssh_SRCS
         ${libssh_SRCS}
         threads/libcrypto.c
         pki_crypto.c
         ecdh_crypto.c
+        curve25519_crypto.c
         getrandom_crypto.c
         md_crypto.c
         libcrypto.c
         dh_crypto.c
+        external/sntrup761.c
        )
     if (NOT HAVE_OPENSSL_EVP_CHACHA20)
         set(libssh_SRCS
@@ -265,13 +269,6 @@ if (WITH_GEX)
   )
 endif (WITH_GEX)
 
-if (WITH_ZLIB)
-  set(libssh_SRCS
-    ${libssh_SRCS}
-    gzip.c
-  )
-endif(WITH_ZLIB)
-
 if (WITH_GSSAPI AND GSSAPI_FOUND)
   set(libssh_SRCS
     ${libssh_SRCS}
@@ -280,13 +277,21 @@ if (WITH_GSSAPI AND GSSAPI_FOUND)
 endif (WITH_GSSAPI AND GSSAPI_FOUND)
 
 if (NOT WITH_NACL)
-    if (NOT HAVE_LIBCRYPTO)
+    if (NOT (HAVE_LIBCRYPTO OR HAVE_MBEDTLS_CURVE25519 OR HAVE_GCRYPT_CURVE25519))
         set(libssh_SRCS
             ${libssh_SRCS}
+            curve25519_fallback.c
             external/curve25519_ref.c
            )
     endif()
 endif (NOT WITH_NACL)
+
+if (HAVE_MLKEM)
+  set(libssh_SRCS
+    ${libssh_SRCS}
+    mlkem768.c
+  )
+endif (HAVE_MLKEM)
 
 # Set the path to the default map file
 set(MAP_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.map")

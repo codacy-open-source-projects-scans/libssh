@@ -10,10 +10,12 @@
 
 #include "torture.h"
 #include "torture_key.h"
-#include <libssh/session.h>
+#include <errno.h>
 #include <libssh/misc.h>
-#include <libssh/pki_priv.h>
 #include <libssh/options.h>
+#include <libssh/pki.h>
+#include <libssh/pki_priv.h>
+#include <libssh/session.h>
 #ifdef WITH_SERVER
 #include <libssh/bind.h>
 #define LIBSSH_CUSTOM_BIND_CONFIG_FILE "my_bind_config"
@@ -88,6 +90,40 @@ static void torture_options_set_host(void **state) {
 
     /* disallow metacharacters in the username */
     rc = ssh_options_set(session, SSH_OPTIONS_HOST, "shallN()tP4ss -@hostname");
+    assert_string_equal(ssh_get_error(session),
+                        "Invalid argument in ssh_options_set");
+    assert_ssh_return_code_equal(session, rc, SSH_ERROR);
+
+    /* IPv6 hostnames should work without square braces */
+    SAFE_FREE(session->opts.username);
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_HOST,
+                         "fd4d:5449:7400:111:626d:3cff:fedf:4d39");
+    assert_return_code(rc, errno);
+    assert_non_null(session->opts.host);
+    assert_string_equal(session->opts.host,
+                        "fd4d:5449:7400:111:626d:3cff:fedf:4d39");
+    assert_null(session->opts.username);
+
+    /* IPv6 hostnames should work also with square braces */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_HOST,
+                         "[fd4d:5449:7400:111:626d:3cff:fedf:4d39]");
+    assert_return_code(rc, errno);
+    assert_non_null(session->opts.host);
+    assert_string_equal(session->opts.host,
+                        "fd4d:5449:7400:111:626d:3cff:fedf:4d39");
+    assert_null(session->opts.username);
+
+    /* IDN need to be in punycode format */
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "xn--bcher-kva.tld");
+    assert_return_code(rc, errno);
+    assert_non_null(session->opts.host);
+    assert_string_equal(session->opts.host, "xn--bcher-kva.tld");
+    assert_null(session->opts.username);
+
+    /* IDN in UTF8 won't work */
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "bücher.tld");
     assert_string_equal(ssh_get_error(session),
                         "Invalid argument in ssh_options_set");
     assert_ssh_return_code_equal(session, rc, SSH_ERROR);
@@ -181,6 +217,8 @@ static void torture_options_set_key_exchange(void **state)
     /* Test known kexes */
     rc = ssh_options_set(session,
                          SSH_OPTIONS_KEY_EXCHANGE,
+                         "sntrup761x25519-sha512,"
+                         "sntrup761x25519-sha512@openssh.com,"
                          "curve25519-sha256,curve25519-sha256@libssh.org,"
                          "ecdh-sha2-nistp256,diffie-hellman-group16-sha512,"
                          "diffie-hellman-group18-sha512,"
@@ -195,6 +233,8 @@ static void torture_options_set_key_exchange(void **state)
                             "diffie-hellman-group14-sha256");
     } else {
         assert_string_equal(session->opts.wanted_methods[SSH_KEX],
+                            "sntrup761x25519-sha512,"
+                            "sntrup761x25519-sha512@openssh.com,"
                             "curve25519-sha256,curve25519-sha256@libssh.org,"
                             "ecdh-sha2-nistp256,diffie-hellman-group16-sha512,"
                             "diffie-hellman-group18-sha512,"
@@ -241,13 +281,27 @@ static void torture_options_get_key_exchange(void **state)
                             "diffie-hellman-group16-sha512,"
                             "diffie-hellman-group18-sha512");
     } else {
+#ifdef HAVE_MLKEM
         assert_string_equal(value,
+                            "mlkem768x25519-sha256,"
+                            "sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,"
                             "curve25519-sha256,curve25519-sha256@libssh.org,"
                             "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
                             "ecdh-sha2-nistp521,diffie-hellman-group18-sha512,"
                             "diffie-hellman-group16-sha512,"
                             "diffie-hellman-group-exchange-sha256,"
                             "diffie-hellman-group14-sha256");
+#else
+        assert_string_equal(value,
+                            "sntrup761x25519-sha512,"
+                            "sntrup761x25519-sha512@openssh.com,"
+                            "curve25519-sha256,curve25519-sha256@libssh.org,"
+                            "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
+                            "ecdh-sha2-nistp521,diffie-hellman-group18-sha512,"
+                            "diffie-hellman-group16-sha512,"
+                            "diffie-hellman-group-exchange-sha256,"
+                            "diffie-hellman-group14-sha256");
+#endif
     }
     ssh_string_free_char(value);
 
@@ -1032,7 +1086,7 @@ static void torture_options_config_match(void **state)
     fclose(config);
 
     rv = ssh_options_parse_config(session, "test_config");
-    assert_ssh_return_code_equal(session, rv, SSH_ERROR);
+    assert_ssh_return_code_equal(session, rv, SSH_OK);
 
     /* The Match all keyword needs to be the only one (start) */
     torture_reset_config(session);
@@ -1277,7 +1331,7 @@ static void torture_options_copy(void **state)
           "BindAddress 127.0.0.2\n"
           "GlobalKnownHostsFile /etc/ssh/known_hosts2\n"
           "UserKnownHostsFile ~/.ssh/known_hosts2\n"
-          "KexAlgorithms curve25519-sha256,ecdh-sha2-nistp521\n"
+          "KexAlgorithms curve25519-sha256,sntrup761x25519-sha512@openssh.com,ecdh-sha2-nistp521\n"
           "Ciphers aes256-ctr\n"
           "MACs hmac-sha2-256\n"
           "HostKeyAlgorithms ssh-ed25519,ecdsa-sha2-nistp521\n"
@@ -1418,6 +1472,8 @@ static void torture_options_getopt(void **state)
     /* Test with all the supported options */
     rc = ssh_options_getopt(session, &argc, (char **)argv);
 #ifdef _MSC_VER
+    UNUSED_VAR(new_level);
+
     /* Not supported in windows */
     assert_ssh_return_code_equal(session, rc, -1);
 #else
@@ -1957,7 +2013,7 @@ static void torture_options_set_verbosity (void **state)
 static void torture_options_set_rsa_min_size(void **state)
 {
     ssh_session session = *state;
-    int min_allowed = 768, key_size, rc;
+    int min_allowed = RSA_MIN_KEY_SIZE, key_size, rc;
 
     /* Check that passing NULL leads to failure */
     rc = ssh_options_set(session, SSH_OPTIONS_RSA_MIN_SIZE, NULL);
@@ -2115,11 +2171,20 @@ torture_bind_options_import_key(void **state)
     /* set ed25519 key */
     base64_key = torture_get_openssh_testkey(SSH_KEYTYPE_ED25519, 0);
     rc = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL, &key);
-    assert_int_equal(rc, SSH_OK);
-    assert_non_null(key);
+    if (ssh_fips_mode()) {
+        assert_int_equal(rc, SSH_ERROR);
+        assert_null(key);
+    } else {
+        assert_int_equal(rc, SSH_OK);
+        assert_non_null(key);
+    }
 
     rc = ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY, key);
-    assert_int_equal(rc, 0);
+    if (ssh_fips_mode()) {
+        assert_int_equal(rc, SSH_ERROR);
+    } else {
+        assert_int_equal(rc, 0);
+    }
 
     /* set rsa key */
     base64_key = torture_get_testkey(SSH_KEYTYPE_RSA, 0);
@@ -2168,7 +2233,11 @@ torture_bind_options_import_key_str(void **state)
 
     rc =
         ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY_STR, base64_key);
-    assert_int_equal(rc, 0);
+    if (ssh_fips_mode()) {
+        assert_int_equal(rc, SSH_ERROR);
+    } else {
+        assert_int_equal(rc, 0);
+    }
 
     /* set rsa key */
     base64_key = torture_get_testkey(SSH_KEYTYPE_RSA, 0);
@@ -2210,9 +2279,14 @@ static void torture_bind_options_hostkey(void **state)
     rc = ssh_bind_options_set(bind,
                               SSH_BIND_OPTIONS_HOSTKEY,
                               LIBSSH_ED25519_TESTKEY);
-    assert_int_equal(rc, 0);
-    assert_non_null(bind->ed25519key);
-    assert_string_equal(bind->ed25519key, LIBSSH_ED25519_TESTKEY);
+    if (ssh_fips_mode()) {
+        assert_int_equal(rc, SSH_ERROR);
+        assert_null(bind->ed25519key);
+    } else {
+        assert_int_equal(rc, 0);
+        assert_non_null(bind->ed25519key);
+        assert_string_equal(bind->ed25519key, LIBSSH_ED25519_TESTKEY);
+    }
 
 #ifdef HAVE_ECC
     /* Test ECDSA key */
@@ -2364,7 +2438,7 @@ static void torture_bind_options_set_rsa_min_size(void **state)
 {
     struct bind_st *test_state = NULL;
     ssh_bind bind = NULL;
-    int rc, min_allowed = 768, key_size;
+    int rc, min_allowed = RSA_MIN_KEY_SIZE, key_size;
 
     assert_non_null(state);
     test_state = *((struct bind_st **)state);

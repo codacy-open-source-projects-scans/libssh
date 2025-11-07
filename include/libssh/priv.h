@@ -30,10 +30,11 @@
 #define _LIBSSH_PRIV_H
 
 #include <limits.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
+#include <time.h>
 
 #if !defined(HAVE_STRTOULL)
 # if defined(HAVE___STRTOULL)
@@ -163,6 +164,9 @@ struct timeval;
 int ssh_gettimeofday(struct timeval *__p, void *__t);
 
 #define gettimeofday ssh_gettimeofday
+
+struct tm *ssh_localtime(const time_t *timer, struct tm *result);
+# define localtime_r ssh_localtime
 
 #define _XCLOSESOCKET closesocket
 
@@ -329,7 +333,7 @@ int decompress_buffer(ssh_session session,ssh_buffer buf, size_t maxlen);
 /* match.c */
 int match_pattern_list(const char *string, const char *pattern,
     size_t len, int dolower);
-int match_hostname(const char *host, const char *pattern, unsigned int len);
+int match_hostname(const char *host, const char *pattern, size_t len);
 #ifndef _WIN32
 int match_cidr_address_list(const char *address,
                             const char *addrlist,
@@ -353,10 +357,10 @@ int ssh_connector_remove_event(ssh_connector connector);
 #define SAFE_FREE(x) do { if ((x) != NULL) {free(x); x=NULL;} } while(0)
 
 /** Zero a structure */
-#define ZERO_STRUCT(x) memset((char *)&(x), 0, sizeof(x))
+#define ZERO_STRUCT(x) memset(&(x), 0, sizeof(x))
 
 /** Zero a structure given a pointer to the structure */
-#define ZERO_STRUCTP(x) do { if ((x) != NULL) memset((char *)(x), 0, sizeof(*(x))); } while(0)
+#define ZERO_STRUCTP(x) do { if ((x) != NULL) memset((x), 0, sizeof(*(x))); } while(0)
 
 /** Get the size of an array */
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
@@ -364,6 +368,17 @@ int ssh_connector_remove_event(ssh_connector connector);
 #ifndef HAVE_EXPLICIT_BZERO
 void explicit_bzero(void *s, size_t n);
 #endif /* !HAVE_EXPLICIT_BZERO */
+
+void burn_free(void *ptr, size_t len);
+
+/** Free memory space after zeroing it */
+#define BURN_FREE(x, len)          \
+    do {                           \
+        if ((x) != NULL) {         \
+            burn_free((x), (len)); \
+            (x) = NULL;            \
+        }                          \
+    } while (0)
 
 /**
  * This is a hack to fix warnings. The idea is to use this everywhere that we
@@ -384,6 +399,7 @@ void explicit_bzero(void *s, size_t n);
  */
 #define discard_const_p(type, ptr) ((type *)discard_const(ptr))
 
+#ifndef __VA_NARG__
 /**
  * Get the argument count of variadic arguments
  */
@@ -415,6 +431,7 @@ void explicit_bzero(void *s, size_t n);
         29, 28, 27, 26, 25, 24, 23, 22, 21, 20, \
         19, 18, 17, 16, 15, 14, 13, 12, 11, 10, \
          9,  8,  7,  6,  5,  4,  3,  2,  1,  0
+#endif
 
 #define CLOSE_SOCKET(s) do { if ((s) != SSH_INVALID_SOCKET) { _XCLOSESOCKET(s); (s) = SSH_INVALID_SOCKET;} } while(0)
 

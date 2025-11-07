@@ -105,6 +105,11 @@ ssh_bind_config_keyword_table[] = {
         .allowed_in_match = true
     },
     {
+        .name   = "requiredrsasize",
+        .opcode = BIND_CFG_REQUIRED_RSA_SIZE,
+        .allowed_in_match = true
+    },
+    {
         .opcode = BIND_CFG_UNKNOWN,
     }
 };
@@ -200,7 +205,7 @@ local_parse_file(ssh_bind bind,
                  uint8_t *seen,
                  unsigned int depth)
 {
-    FILE *f;
+    FILE *f = NULL;
     char line[MAX_LINE_SIZE] = {0};
     unsigned int count = 0;
     int rv;
@@ -293,6 +298,7 @@ ssh_bind_config_parse_line(ssh_bind bind,
     const char *p = NULL;
     char *s = NULL, *x = NULL;
     char *keyword = NULL;
+    long l;
     size_t len;
 
     int rc = 0;
@@ -594,6 +600,18 @@ ssh_bind_config_parse_line(ssh_bind bind,
             }
         }
         break;
+    case BIND_CFG_REQUIRED_RSA_SIZE:
+        l = ssh_config_get_long(&s, -1);
+        if (l >= 0 && (*parser_flags & PARSING)) {
+            rc = ssh_bind_options_set(bind, SSH_BIND_OPTIONS_RSA_MIN_SIZE, &l);
+            if (rc != 0) {
+                SSH_LOG(SSH_LOG_TRACE,
+                        "line %d: Failed to set RequiredRSASize value '%ld'",
+                        count,
+                        l);
+            }
+        }
+        break;
     case BIND_CFG_NOT_ALLOWED_IN_MATCH:
         SSH_LOG(SSH_LOG_DEBUG, "Option not allowed in Match block: %s, line: %d",
                 keyword, count);
@@ -626,7 +644,7 @@ int ssh_bind_config_parse_file(ssh_bind bind, const char *filename)
 {
     char line[MAX_LINE_SIZE] = {0};
     unsigned int count = 0;
-    FILE *f;
+    FILE *f = NULL;
     uint32_t parser_flags;
     int rv;
 
@@ -669,7 +687,8 @@ int ssh_bind_config_parse_string(ssh_bind bind, const char *input)
 {
     char line[MAX_LINE_SIZE] = {0};
     const char *c = input, *line_start = input;
-    unsigned int line_num = 0, line_len;
+    unsigned int line_num = 0;
+    size_t line_len;
     uint32_t parser_flags;
     int rv;
 
@@ -698,8 +717,10 @@ int ssh_bind_config_parse_string(ssh_bind bind, const char *input)
         }
         line_len = c - line_start;
         if (line_len > MAX_LINE_SIZE - 1) {
-            SSH_LOG(SSH_LOG_WARN, "Line %u too long: %u characters",
-                    line_num, line_len);
+            SSH_LOG(SSH_LOG_WARN,
+                    "Line %u too long: %zu characters",
+                    line_num,
+                    line_len);
             return SSH_ERROR;
         }
         memcpy(line, line_start, line_len);

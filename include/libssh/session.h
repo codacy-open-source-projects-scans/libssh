@@ -89,6 +89,9 @@ enum ssh_pending_call_e {
 #define SSH_SESSION_FLAG_KEX_STRICT 0x0010
 /* Unexpected packets have been sent while the session was still unencrypted */
 #define SSH_SESSION_FLAG_KEX_TAINTED 0x0020
+/* The scp on server can not handle quoted paths. Skip the mitigation for
+ * CVE-2019-14889 when using scp */
+#define SSH_SESSION_FLAG_SCP_QUOTING_BROKEN 0x0040
 
 /* codes to use with ssh_handle_packets*() */
 /* Infinite timeout */
@@ -120,6 +123,8 @@ enum ssh_pending_call_e {
 /* server-sig-algs extension */
 #define SSH_EXT_SIG_RSA_SHA256  0x02
 #define SSH_EXT_SIG_RSA_SHA512  0x04
+/* Host-bound public key authentication extension */
+#define SSH_EXT_PUBLICKEY_HOSTBOUND 0x08
 
 /* members that are common to ssh_session and ssh_bind */
 struct ssh_common_struct {

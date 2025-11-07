@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12.0)
+cmake_minimum_required(VERSION 3.14.0)
 
 # Specify search path for CMake modules to be loaded by include()
 # and find_package()
@@ -9,7 +9,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
 include(DefineCMakeDefaults)
 include(DefineCompilerFlags)
 
-project(libssh VERSION 0.11.00 LANGUAGES C CXX)
+project(libssh VERSION 0.11.00 LANGUAGES C)
 
 # global needed variable
 set(APPLICATION_NAME ${PROJECT_NAME})
@@ -41,6 +41,8 @@ macro_ensure_out_of_source_build("${PROJECT_NAME} requires an out of source buil
 # Copy library files to a lib sub-directory
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
+set(LIBSSSH_PC_REQUIRES_PRIVATE "")
+
 # search for libraries
 if (WITH_ZLIB)
     find_package(ZLIB REQUIRED)
@@ -66,6 +68,7 @@ find_package(Threads)
 
 if (WITH_GSSAPI)
     find_package(GSSAPI)
+    list(APPEND LIBSSH_PC_REQUIRES_PRIVATE ${GSSAPI_PC_REQUIRES})
 endif (WITH_GSSAPI)
 
 if (WITH_NACL)
@@ -190,12 +193,13 @@ endif (WITH_SYMBOL_VERSIONING AND ABIMAP_FOUND)
 
 # Coverage
 if (WITH_COVERAGE)
+    ENABLE_LANGUAGE(CXX)
     include(CodeCoverage)
     setup_target_for_coverage_lcov(
         NAME "coverage"
         EXECUTABLE make test
         DEPENDENCIES ssh tests)
-    set(GCOVR_ADDITIONAL_ARGS --xml-pretty --exclude-unreachable-branches --print-summary)
+    set(GCOVR_ADDITIONAL_ARGS --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors)
     setup_target_for_coverage_gcovr_xml(
         NAME "coverage_xml"
         EXECUTABLE make test
@@ -248,9 +252,15 @@ message(STATUS "Benchmarks: ${WITH_BENCHMARKS}")
 message(STATUS "Symbol versioning: ${WITH_SYMBOL_VERSIONING}")
 message(STATUS "Allow ABI break: ${WITH_ABI_BREAK}")
 message(STATUS "Release is final: ${WITH_FINAL}")
+if (WITH_HERMETIC_USR)
+    message(STATUS "User global client config: ${USR_GLOBAL_CLIENT_CONFIG}")
+endif ()
 message(STATUS "Global client config: ${GLOBAL_CLIENT_CONFIG}")
 if (WITH_SERVER)
-message(STATUS "Global bind config: ${GLOBAL_BIND_CONFIG}")
+    if (WITH_HERMETIC_USR)
+        message(STATUS "User global bind config: ${USR_GLOBAL_BIND_CONFIG}")
+    endif ()
+    message(STATUS "Global bind config: ${GLOBAL_BIND_CONFIG}")
 endif()
 message(STATUS "********************************************")
 

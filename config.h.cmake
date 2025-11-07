@@ -9,9 +9,11 @@
 #cmakedefine SOURCEDIR "${SOURCEDIR}"
 
 /* Global bind configuration file path */
+#cmakedefine USR_GLOBAL_BIND_CONFIG "${USR_GLOBAL_BIND_CONFIG}"
 #cmakedefine GLOBAL_BIND_CONFIG "${GLOBAL_BIND_CONFIG}"
 
 /* Global client configuration file path */
+#cmakedefine USR_GLOBAL_CLIENT_CONFIG "${USR_GLOBAL_CLIENT_CONFIG}"
 #cmakedefine GLOBAL_CLIENT_CONFIG "${GLOBAL_CLIENT_CONFIG}"
 
 /************************** HEADER FILES *************************/
@@ -85,6 +87,9 @@
 /* Define to 1 if you have elliptic curve cryptography in openssl */
 #cmakedefine HAVE_OPENSSL_ECC 1
 
+/* Define to 1 if mbedTLS supports curve25519 */
+#cmakedefine HAVE_MBEDTLS_CURVE25519 1
+
 /* Define to 1 if you have elliptic curve cryptography in gcrypt */
 #cmakedefine HAVE_GCRYPT_ECC 1
 
@@ -96,6 +101,9 @@
 
 /* Define to 1 if you have gcrypt with ChaCha20/Poly1305 support */
 #cmakedefine HAVE_GCRYPT_CHACHA_POLY 1
+
+/* Define to 1 if you have gcrypt with curve25519 support */
+#cmakedefine HAVE_GCRYPT_CURVE25519
 
 /*************************** FUNCTIONS ***************************/
 
@@ -182,6 +190,9 @@
 
 /* Define to 1 if we have support for blowfish */
 #cmakedefine HAVE_BLOWFISH 1
+
+/* Define to 1 if we have support for ML-KEM */
+#cmakedefine HAVE_MLKEM 1
 
 /*************************** LIBRARIES ***************************/
 

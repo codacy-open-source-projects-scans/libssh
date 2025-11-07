@@ -26,6 +26,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+
 #include "libssh/priv.h"
 #include "libssh/libssh.h"
 #include "libssh/crypto.h"
@@ -59,7 +63,7 @@
  */
 ssh_session ssh_new(void)
 {
-    ssh_session session;
+    ssh_session session = NULL;
     char *id = NULL;
     int rc;
 
@@ -294,7 +298,7 @@ void ssh_free(ssh_session session)
 
   /* options */
   if (session->opts.identity) {
-      char *id;
+      char *id = NULL;
 
       for (id = ssh_list_pop_head(char *, session->opts.identity);
            id != NULL;
@@ -305,7 +309,7 @@ void ssh_free(ssh_session session)
   }
 
   if (session->opts.identity_non_exp) {
-      char *id;
+      char *id = NULL;
 
       for (id = ssh_list_pop_head(char *, session->opts.identity_non_exp);
            id != NULL;
@@ -409,10 +413,10 @@ const char* ssh_get_clientbanner(ssh_session session) {
  * @return Returns the server banner string or NULL.
  */
 const char* ssh_get_serverbanner(ssh_session session) {
-	if(!session) {
-		return NULL;
-	}
-	return session->serverbanner;
+    if (!session) {
+        return NULL;
+    }
+    return session->serverbanner;
 }
 
 /**
@@ -429,28 +433,40 @@ const char* ssh_get_kex_algo(ssh_session session) {
     }
 
     switch (session->current_crypto->kex_type) {
-        case SSH_KEX_DH_GROUP1_SHA1:
-            return "diffie-hellman-group1-sha1";
-        case SSH_KEX_DH_GROUP14_SHA1:
-            return "diffie-hellman-group14-sha1";
-        case SSH_KEX_DH_GROUP14_SHA256:
-            return "diffie-hellman-group14-sha256";
-        case SSH_KEX_DH_GROUP16_SHA512:
-            return "diffie-hellman-group16-sha512";
-        case SSH_KEX_DH_GROUP18_SHA512:
-            return "diffie-hellman-group18-sha512";
-        case SSH_KEX_ECDH_SHA2_NISTP256:
-            return "ecdh-sha2-nistp256";
-        case SSH_KEX_ECDH_SHA2_NISTP384:
-            return "ecdh-sha2-nistp384";
-        case SSH_KEX_ECDH_SHA2_NISTP521:
-            return "ecdh-sha2-nistp521";
-        case SSH_KEX_CURVE25519_SHA256:
-           return "curve25519-sha256";
-        case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
-            return "curve25519-sha256@libssh.org";
-        default:
-            break;
+    case SSH_KEX_DH_GROUP1_SHA1:
+        return "diffie-hellman-group1-sha1";
+    case SSH_KEX_DH_GROUP14_SHA1:
+        return "diffie-hellman-group14-sha1";
+    case SSH_KEX_DH_GROUP14_SHA256:
+        return "diffie-hellman-group14-sha256";
+    case SSH_KEX_DH_GROUP16_SHA512:
+        return "diffie-hellman-group16-sha512";
+    case SSH_KEX_DH_GROUP18_SHA512:
+        return "diffie-hellman-group18-sha512";
+    case SSH_KEX_ECDH_SHA2_NISTP256:
+        return "ecdh-sha2-nistp256";
+    case SSH_KEX_ECDH_SHA2_NISTP384:
+        return "ecdh-sha2-nistp384";
+    case SSH_KEX_ECDH_SHA2_NISTP521:
+        return "ecdh-sha2-nistp521";
+    case SSH_KEX_CURVE25519_SHA256:
+        return "curve25519-sha256";
+    case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
+        return "curve25519-sha256@libssh.org";
+    case SSH_KEX_SNTRUP761X25519_SHA512_OPENSSH_COM:
+        return "sntrup761x25519-sha512@openssh.com";
+    case SSH_KEX_SNTRUP761X25519_SHA512:
+        return "sntrup761x25519-sha512";
+#ifdef HAVE_MLKEM
+    case SSH_KEX_MLKEM768X25519_SHA256:
+        return "mlkem768x25519-sha256";
+#endif /* HAVE_MLKEM */
+#ifdef WITH_GEX
+    case SSH_KEX_DH_GEX_SHA1:
+        return "diffie-hellman-group-exchange-sha1";
+    case SSH_KEX_DH_GEX_SHA256:
+        return "diffie-hellman-group-exchange-sha256";
+#endif /* WITH_GEX */
     }
 
     return NULL;
@@ -734,7 +750,10 @@ int ssh_handle_packets(ssh_session session, int timeout)
             ssh_set_error_oom(session);
             return SSH_ERROR;
         }
-        ssh_poll_ctx_add(ctx, spoll);
+        rc = ssh_poll_ctx_add(ctx, spoll);
+        if (rc != SSH_OK) {
+            return SSH_ERROR;
+        }
     }
 
     if (timeout == SSH_TIMEOUT_USER) {
@@ -936,16 +955,41 @@ int ssh_get_version(ssh_session session) {
  * @param user is a pointer to session
  */
 void ssh_socket_exception_callback(int code, int errno_code, void *user){
-    ssh_session session=(ssh_session)user;
+    ssh_session session = (ssh_session)user;
 
-    SSH_LOG(SSH_LOG_RARE,"Socket exception callback: %d (%d)",code, errno_code);
+    SSH_LOG(SSH_LOG_RARE,
+            "Socket exception callback: %d (%d)",
+            code,
+            errno_code);
     session->session_state = SSH_SESSION_STATE_ERROR;
     if (errno_code == 0 && code == SSH_SOCKET_EXCEPTION_EOF) {
         ssh_set_error(session, SSH_FATAL, "Socket error: disconnected");
+#ifdef _WIN32
+    } else if (errno_code == WSAENETDOWN) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: network down");
+    } else if (errno_code == WSAENETUNREACH) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: network unreachable");
+    } else if (errno_code == WSAENETRESET) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: network reset");
+    } else if (errno_code == WSAECONNABORTED) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: connection aborted");
+    } else if (errno_code == WSAECONNRESET) {
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "Socket error: connection reset by peer");
+    } else if (errno_code == WSAETIMEDOUT) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: connection timed out");
+    } else if (errno_code == WSAECONNREFUSED) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: connection refused");
+    } else if (errno_code == WSAEHOSTUNREACH) {
+        ssh_set_error(session, SSH_FATAL, "Socket error: host unreachable");
+#endif
     } else {
         char err_msg[SSH_ERRNO_MSG_MAX] = {0};
-        ssh_set_error(session, SSH_FATAL, "Socket error: %s",
-                ssh_strerror(errno_code, err_msg, SSH_ERRNO_MSG_MAX));
+        ssh_set_error(session,
+                      SSH_FATAL,
+                      "Socket error: %s",
+                      ssh_strerror(errno_code, err_msg, SSH_ERRNO_MSG_MAX));
     }
 
     session->ssh_connection_callback(session);
@@ -1222,7 +1266,7 @@ int ssh_get_publickey_hash(const ssh_key key,
                            unsigned char **hash,
                            size_t *hlen)
 {
-    ssh_string blob;
+    ssh_string blob = NULL;
     unsigned char *h = NULL;
     int rc;
 
@@ -1232,110 +1276,108 @@ int ssh_get_publickey_hash(const ssh_key key,
     }
 
     switch (type) {
-    case SSH_PUBLICKEY_HASH_SHA1:
-        {
-            SHACTX ctx;
+    case SSH_PUBLICKEY_HASH_SHA1: {
+        SHACTX ctx = NULL;
 
-            h = calloc(1, SHA_DIGEST_LEN);
-            if (h == NULL) {
-                rc = -1;
-                goto out;
-            }
-
-            ctx = sha1_init();
-            if (ctx == NULL) {
-                free(h);
-                rc = -1;
-                goto out;
-            }
-
-            rc = sha1_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
-            if (rc != SSH_OK) {
-                free(h);
-                sha1_ctx_free(ctx);
-                goto out;
-            }
-            rc = sha1_final(h, ctx);
-            if (rc != SSH_OK) {
-                free(h);
-                goto out;
-            }
-
-            *hlen = SHA_DIGEST_LEN;
+        h = calloc(1, SHA_DIGEST_LEN);
+        if (h == NULL) {
+            rc = -1;
+            goto out;
         }
-        break;
-    case SSH_PUBLICKEY_HASH_SHA256:
-        {
-            SHA256CTX ctx;
 
-            h = calloc(1, SHA256_DIGEST_LEN);
-            if (h == NULL) {
-                rc = -1;
-                goto out;
-            }
-
-            ctx = sha256_init();
-            if (ctx == NULL) {
-                free(h);
-                rc = -1;
-                goto out;
-            }
-
-            rc = sha256_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
-            if (rc != SSH_OK) {
-                free(h);
-                sha256_ctx_free(ctx);
-                goto out;
-            }
-            rc = sha256_final(h, ctx);
-            if (rc != SSH_OK) {
-                free(h);
-                goto out;
-            }
-
-            *hlen = SHA256_DIGEST_LEN;
+        ctx = sha1_init();
+        if (ctx == NULL) {
+            free(h);
+            rc = -1;
+            goto out;
         }
-        break;
-    case SSH_PUBLICKEY_HASH_MD5:
-        {
-            MD5CTX ctx;
 
-            /* In FIPS mode, we cannot use MD5 */
-            if (ssh_fips_mode()) {
-                SSH_LOG(SSH_LOG_TRACE, "In FIPS mode MD5 is not allowed."
-                                       "Try using SSH_PUBLICKEY_HASH_SHA256");
-                rc = SSH_ERROR;
-                goto out;
-            }
-
-            h = calloc(1, MD5_DIGEST_LEN);
-            if (h == NULL) {
-                rc = -1;
-                goto out;
-            }
-
-            ctx = md5_init();
-            if (ctx == NULL) {
-                free(h);
-                rc = -1;
-                goto out;
-            }
-
-            rc = md5_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
-            if (rc != SSH_OK) {
-                free(h);
-                md5_ctx_free(ctx);
-                goto out;
-            }
-            rc = md5_final(h, ctx);
-            if (rc != SSH_OK) {
-                free(h);
-                goto out;
-            }
-
-            *hlen = MD5_DIGEST_LEN;
+        rc = sha1_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
+        if (rc != SSH_OK) {
+            free(h);
+            sha1_ctx_free(ctx);
+            goto out;
         }
+        rc = sha1_final(h, ctx);
+        if (rc != SSH_OK) {
+            free(h);
+            goto out;
+        }
+
+        *hlen = SHA_DIGEST_LEN;
         break;
+    }
+    case SSH_PUBLICKEY_HASH_SHA256: {
+        SHA256CTX ctx = NULL;
+
+        h = calloc(1, SHA256_DIGEST_LEN);
+        if (h == NULL) {
+            rc = -1;
+            goto out;
+        }
+
+        ctx = sha256_init();
+        if (ctx == NULL) {
+            free(h);
+            rc = -1;
+            goto out;
+        }
+
+        rc = sha256_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
+        if (rc != SSH_OK) {
+            free(h);
+            sha256_ctx_free(ctx);
+            goto out;
+        }
+        rc = sha256_final(h, ctx);
+        if (rc != SSH_OK) {
+            free(h);
+            goto out;
+        }
+
+        *hlen = SHA256_DIGEST_LEN;
+        break;
+    }
+    case SSH_PUBLICKEY_HASH_MD5: {
+        MD5CTX ctx = NULL;
+
+        /* In FIPS mode, we cannot use MD5 */
+        if (ssh_fips_mode()) {
+            SSH_LOG(SSH_LOG_TRACE,
+                    "In FIPS mode MD5 is not allowed."
+                    "Try using SSH_PUBLICKEY_HASH_SHA256");
+            rc = SSH_ERROR;
+            goto out;
+        }
+
+        h = calloc(1, MD5_DIGEST_LEN);
+        if (h == NULL) {
+            rc = -1;
+            goto out;
+        }
+
+        ctx = md5_init();
+        if (ctx == NULL) {
+            free(h);
+            rc = -1;
+            goto out;
+        }
+
+        rc = md5_update(ctx, ssh_string_data(blob), ssh_string_len(blob));
+        if (rc != SSH_OK) {
+            free(h);
+            md5_ctx_free(ctx);
+            goto out;
+        }
+        rc = md5_final(h, ctx);
+        if (rc != SSH_OK) {
+            free(h);
+            goto out;
+        }
+
+        *hlen = MD5_DIGEST_LEN;
+        break;
+    }
     default:
         rc = -1;
         goto out;
