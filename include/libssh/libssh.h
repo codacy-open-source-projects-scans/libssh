@@ -107,6 +107,7 @@ typedef struct ssh_session_struct* ssh_session;
 typedef struct ssh_string_struct* ssh_string;
 typedef struct ssh_event_struct* ssh_event;
 typedef struct ssh_connector_struct * ssh_connector;
+typedef struct ssh_pki_ctx_struct *ssh_pki_ctx;
 typedef void* ssh_gssapi_creds;
 
 /* Socket type */
@@ -420,6 +421,7 @@ enum ssh_options_e {
     SSH_OPTIONS_CERTIFICATE,
     SSH_OPTIONS_PROXYJUMP,
     SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND,
+    SSH_OPTIONS_PKI_CONTEXT,
 };
 
 enum {
@@ -721,9 +723,17 @@ LIBSSH_API int ssh_key_cmp(const ssh_key k1,
                            const ssh_key k2,
                            enum ssh_keycmp_e what);
 LIBSSH_API ssh_key ssh_key_dup(const ssh_key key);
+LIBSSH_API uint32_t ssh_key_get_sk_flags(const ssh_key key);
+LIBSSH_API ssh_string ssh_key_get_sk_application(const ssh_key key);
+LIBSSH_API ssh_string ssh_key_get_sk_user_id(const ssh_key key);
 
-LIBSSH_API int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
-        ssh_key *pkey);
+SSH_DEPRECATED LIBSSH_API int
+ssh_pki_generate(enum ssh_keytypes_e type, int parameter, ssh_key *pkey);
+
+LIBSSH_API int ssh_pki_generate_key(enum ssh_keytypes_e type,
+                                    ssh_pki_ctx pki_context,
+                                    ssh_key *pkey);
+
 LIBSSH_API int ssh_pki_import_privkey_base64(const char *b64_key,
                                              const char *passphrase,
                                              ssh_auth_callback auth_fn,
@@ -902,6 +912,7 @@ enum sshsig_digest_e {
 LIBSSH_API int sshsig_sign(const void *data,
                            size_t data_length,
                            ssh_key privkey,
+                           ssh_pki_ctx pki_context,
                            const char *sig_namespace,
                            enum sshsig_digest_e hash_alg,
                            char **signature);
@@ -910,6 +921,83 @@ LIBSSH_API int sshsig_verify(const void *data,
                              const char *signature,
                              const char *sig_namespace,
                              ssh_key *sign_key);
+
+/* PKI context API */
+
+enum ssh_pki_options_e {
+    SSH_PKI_OPTION_RSA_KEY_SIZE,
+
+    /* Security Key options */
+    SSH_PKI_OPTION_SK_APPLICATION,
+    SSH_PKI_OPTION_SK_FLAGS,
+    SSH_PKI_OPTION_SK_USER_ID,
+    SSH_PKI_OPTION_SK_CHALLENGE,
+    SSH_PKI_OPTION_SK_CALLBACKS,
+};
+
+/* FIDO2/U2F Operation Flags */
+
+/** Requires user presence confirmation (tap/touch) */
+#ifndef SSH_SK_USER_PRESENCE_REQD
+#define SSH_SK_USER_PRESENCE_REQD 0x01
+#endif
+
+/** Requires user verification (PIN/biometric) - FIDO2 only */
+#ifndef SSH_SK_USER_VERIFICATION_REQD
+#define SSH_SK_USER_VERIFICATION_REQD 0x04
+#endif
+
+/** Force resident key enrollment even if a resident key with given user ID
+ * already exists - FIDO2 only */
+#ifndef SSH_SK_FORCE_OPERATION
+#define SSH_SK_FORCE_OPERATION 0x10
+#endif
+
+/** Create/use resident key stored on authenticator - FIDO2 only */
+#ifndef SSH_SK_RESIDENT_KEY
+#define SSH_SK_RESIDENT_KEY 0x20
+#endif
+
+LIBSSH_API ssh_pki_ctx ssh_pki_ctx_new(void);
+
+LIBSSH_API int ssh_pki_ctx_options_set(ssh_pki_ctx context,
+                                       enum ssh_pki_options_e option,
+                                       const void *value);
+
+LIBSSH_API int ssh_pki_ctx_set_sk_pin_callback(ssh_pki_ctx context,
+                                               ssh_auth_callback pin_callback,
+                                               void *userdata);
+
+#define SSH_SK_OPTION_NAME_DEVICE_PATH "device"
+#define SSH_SK_OPTION_NAME_USER_ID     "user"
+
+LIBSSH_API int ssh_pki_ctx_sk_callbacks_option_set(ssh_pki_ctx context,
+                                                   const char *name,
+                                                   const char *value,
+                                                   bool required);
+
+LIBSSH_API int ssh_pki_ctx_sk_callbacks_options_clear(ssh_pki_ctx context);
+
+LIBSSH_API int
+ssh_pki_ctx_get_sk_attestation_buffer(const struct ssh_pki_ctx_struct *context,
+                                      ssh_buffer *attestation_buffer);
+
+LIBSSH_API void ssh_pki_ctx_free(ssh_pki_ctx context);
+
+#define SSH_PKI_CTX_FREE(x)      \
+    do {                         \
+        if ((x) != NULL) {       \
+            ssh_pki_ctx_free(x); \
+            x = NULL;            \
+        }                        \
+    } while (0)
+
+/* Security key resident keys API */
+
+LIBSSH_API int
+ssh_sk_resident_keys_load(const struct ssh_pki_ctx_struct *pki_context,
+                          ssh_key **resident_keys_result,
+                          size_t *num_keys_found_result);
 
 #ifndef LIBSSH_LEGACY_0_4
 #include "libssh/legacy.h"

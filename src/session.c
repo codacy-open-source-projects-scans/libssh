@@ -108,6 +108,12 @@ ssh_session ssh_new(void)
         goto err;
     }
 
+    /* Initialise a default PKI context */
+    session->pki_context = ssh_pki_ctx_new();
+    if (session->pki_context == NULL) {
+        goto err;
+    }
+
     /* OPTIONS */
     session->opts.StrictHostKeyChecking = 1;
     session->opts.port = 22;
@@ -183,6 +189,29 @@ ssh_session ssh_new(void)
     if (rc == SSH_ERROR) {
         goto err;
     }
+
+#ifdef WITH_FIDO2
+    /* Add security key identities */
+    id = strdup("%d/id_ed25519_sk");
+    if (id == NULL) {
+        goto err;
+    }
+    rc = ssh_list_append(session->opts.identity_non_exp, id);
+    if (rc == SSH_ERROR) {
+        goto err;
+    }
+
+#ifdef HAVE_ECC
+    id = strdup("%d/id_ecdsa_sk");
+    if (id == NULL) {
+        goto err;
+    }
+    rc = ssh_list_append(session->opts.identity_non_exp, id);
+    if (rc == SSH_ERROR) {
+        goto err;
+    }
+#endif /* HAVE_ECC */
+#endif /* WITH_FIDO2 */
 
     /* Explicitly initialize states */
     session->session_state = SSH_SESSION_STATE_NONE;
@@ -265,6 +294,8 @@ void ssh_free(ssh_session session)
   crypto_free(session->next_crypto);
 
   ssh_agent_free(session->agent);
+
+  SSH_PKI_CTX_FREE(session->pki_context);
 
   ssh_key_free(session->srv.rsa_key);
   session->srv.rsa_key = NULL;

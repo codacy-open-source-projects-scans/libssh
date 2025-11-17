@@ -35,6 +35,7 @@
 #include "libssh/misc.h"
 #include "libssh/options.h"
 #include "libssh/pki.h"
+#include "libssh/pki_context.h"
 #include "libssh/pki_priv.h"
 #include "libssh/priv.h"
 #include "libssh/session.h"
@@ -257,6 +258,15 @@ int ssh_options_copy(ssh_session src, ssh_session *dest)
     new->common.log_verbosity       = src->common.log_verbosity;
     new->common.callbacks           = src->common.callbacks;
 
+    SSH_PKI_CTX_FREE(new->pki_context);
+    if (src->pki_context != NULL) {
+        new->pki_context = ssh_pki_ctx_dup(src->pki_context);
+        if (new->pki_context == NULL) {
+            ssh_free(new);
+            return -1;
+        }
+    }
+
     *dest = new;
 
     return 0;
@@ -382,6 +392,8 @@ int ssh_options_set_algo(ssh_session session,
  *                the identity list.\n
  *                \n
  *                By default id_rsa, id_ecdsa and id_ed25519 files are used.\n
+ *                If libssh is built with FIDO2/U2F support, id_ecdsa_sk and\n
+ *                id_ed25519_sk files are also used by default.\n
  *                \n
  *                The identity used to authenticate with public key will be
  *                prepended to the list.
@@ -627,6 +639,15 @@ int ssh_options_set_algo(ssh_session session,
  *                Set the path to the control socket used for connection sharing.
  *                Set to "none" to disable connection sharing.
  *                (const char *)
+ *
+ *              - SSH_OPTIONS_PKI_CONTEXT
+ *                Attach a previously created generic PKI context to the
+ *                session. This allows supplying per-session PKI
+ *                configuration options for PKI operations.
+ *                All fields from the user's context are copied to the session's
+ *                own context. The user retains ownership of the original
+ *                context and can free it after this call.
+ *                (ssh_pki_ctx)
  *
  *
  * @param  value The value to set. This is a generic pointer and the
@@ -1355,6 +1376,20 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                     }
                     session->opts.exp_flags &= ~SSH_OPT_EXP_FLAG_CONTROL_PATH;
                 }
+            }
+            break;
+        case SSH_OPTIONS_PKI_CONTEXT:
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            }
+
+            SSH_PKI_CTX_FREE(session->pki_context);
+
+            session->pki_context = ssh_pki_ctx_dup((const ssh_pki_ctx)value);
+            if (session->pki_context == NULL) {
+                ssh_set_error_oom(session);
+                return -1;
             }
             break;
         default:

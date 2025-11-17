@@ -56,6 +56,18 @@ if (MINGW AND Threads_FOUND)
   )
 endif()
 
+if (HAVE_LIBFIDO2)
+    set(LIBSSH_PRIVATE_INCLUDE_DIRS
+        ${LIBSSH_PRIVATE_INCLUDE_DIRS}
+        ${LIBFIDO2_INCLUDE_DIR}
+    )
+
+    set(LIBSSH_LINK_LIBRARIES
+        ${LIBSSH_LINK_LIBRARIES}
+        ${LIBFIDO2_LIBRARIES}
+    )
+endif (HAVE_LIBFIDO2)
+
 # The ws2_32 needs to be last for mingw to build
 # https://gitlab.com/libssh/libssh-mirror/-/issues/84
 if (WIN32)
@@ -109,6 +121,7 @@ set(libssh_SRCS
   packet_crypt.c
   pcap.c
   pki.c
+  pki_context.c
   pki_container_openssh.c
   poll.c
   session.c
@@ -292,6 +305,21 @@ if (HAVE_MLKEM)
     mlkem768.c
   )
 endif (HAVE_MLKEM)
+
+if (WITH_FIDO2)
+    set(libssh_SRCS
+        ${libssh_SRCS}
+        sk_common.c
+        pki_sk.c
+    )
+
+    if (HAVE_LIBFIDO2)
+        set(libssh_SRCS
+            ${libssh_SRCS}
+            sk_usbhid.c
+        )
+    endif (HAVE_LIBFIDO2)
+endif (WITH_FIDO2)
 
 # Set the path to the default map file
 set(MAP_PATH "${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.map")

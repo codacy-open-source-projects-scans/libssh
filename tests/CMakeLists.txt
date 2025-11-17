@@ -30,6 +30,15 @@ if (WITH_GSSAPI AND GSSAPI_FOUND)
         OpenSSL::Crypto)
 endif (WITH_GSSAPI AND GSSAPI_FOUND)
 
+# Check for sk-dummy library if FIDO2 support is enabled
+if (WITH_FIDO2)
+    find_file(SK_DUMMY_LIBRARY
+        NAMES sk-dummy.so
+        PATHS /usr/lib64/sshtest /usr/lib/sshtest
+        NO_DEFAULT_PATH
+    )
+endif (WITH_FIDO2)
+
 # create test library
 add_library(${TORTURE_LIBRARY}
             STATIC
@@ -43,6 +52,16 @@ target_link_libraries(${TORTURE_LIBRARY} PRIVATE ${TORTURE_LINK_LIBRARIES})
 target_compile_options(${TORTURE_LIBRARY} PRIVATE
                        -DSSH_PING_EXECUTABLE="${CMAKE_CURRENT_BINARY_DIR}/ssh_ping"
 )
+
+# Check for sk-dummy and add HAVE_SK_DUMMY definition if available
+if (SK_DUMMY_LIBRARY)
+    add_library(sk-dummy SHARED IMPORTED)
+    set_target_properties(sk-dummy PROPERTIES IMPORTED_LOCATION "${SK_DUMMY_LIBRARY}")
+    target_link_libraries(${TORTURE_LIBRARY} PRIVATE sk-dummy)
+    target_compile_definitions(${TORTURE_LIBRARY} PUBLIC HAVE_SK_DUMMY)
+    target_compile_definitions(${TORTURE_LIBRARY} PUBLIC SK_DUMMY_LIBRARY_PATH="${SK_DUMMY_LIBRARY}")
+endif()
+
 if (WITH_COVERAGE)
     append_coverage_compiler_flags_to_target(${TORTURE_LIBRARY})
 endif (WITH_COVERAGE)
@@ -86,6 +105,14 @@ if (CLIENT_TESTING)
                           ssh::static
                           ${WRAP_SYMBOLS}
                          )
+
+    # Link sk-dummy to torture_shared library if available
+    if (SK_DUMMY_LIBRARY)
+        target_link_libraries(${TORTURE_SHARED_LIBRARY} PRIVATE sk-dummy)
+        target_compile_definitions(${TORTURE_SHARED_LIBRARY} PUBLIC HAVE_SK_DUMMY)
+        target_compile_definitions(${TORTURE_SHARED_LIBRARY} PUBLIC SK_DUMMY_LIBRARY_PATH="${SK_DUMMY_LIBRARY}")
+    endif (SK_DUMMY_LIBRARY)
+
     target_compile_options(${TORTURE_SHARED_LIBRARY} PRIVATE
                            -DSSH_PING_EXECUTABLE="${CMAKE_CURRENT_BINARY_DIR}/ssh_ping"
                            -DTORTURE_SHARED
@@ -164,6 +191,8 @@ if (SSH_EXECUTABLE)
         ssh-rsa-cert-v01@openssh.com
         ecdsa-sha2-nistp256-cert-v01@openssh.com ecdsa-sha2-nistp384-cert-v01@openssh.com
         ecdsa-sha2-nistp521-cert-v01@openssh.com
+        sk-ssh-ed25519@openssh.com sk-ecdsa-sha2-nistp256@openssh.com
+        sk-ssh-ed25519-cert-v01@openssh.com sk-ecdsa-sha2-nistp256-cert-v01@openssh.com
         )
     foreach(ALGORITHM ${SSH_ALGORITHMS})
         string(TOUPPER ${ALGORITHM} VARNAME)
@@ -327,6 +356,11 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     file(COPY keys/id_ecdsa.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ed25519 DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ed25519.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    # Security key support
+    file(COPY keys/id_ecdsa_sk DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ecdsa_sk.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ed25519_sk DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+    file(COPY keys/id_ed25519_sk.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
 
     # Allow to auth with bob's public keys on alice and doe account
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys @ONLY)
@@ -338,6 +372,14 @@ if (CLIENT_TESTING OR SERVER_TESTING)
 
     # append ed25519 public key
     file(READ keys/id_ed25519.pub CONTENTS)
+    file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
+
+    # append sk-ecdsa public key
+    file(READ keys/id_ecdsa_sk.pub CONTENTS)
+    file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
+
+    # append sk-ed25519 public key
+    file(READ keys/id_ed25519_sk.pub CONTENTS)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys "${CONTENTS}")
 
     # Allow to auth with bob his public keys on charlie account

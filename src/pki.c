@@ -43,15 +43,18 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "libssh/libssh.h"
-#include "libssh/session.h"
-#include "libssh/priv.h"
-#include "libssh/pki.h"
-#include "libssh/pki_priv.h"
-#include "libssh/keys.h"
-#include "libssh/buffer.h"
-#include "libssh/misc.h"
 #include "libssh/agent.h"
+#include "libssh/buffer.h"
+#include "libssh/keys.h"
+#include "libssh/libssh.h"
+#include "libssh/misc.h"
+#include "libssh/pki.h"
+#include "libssh/pki_context.h"
+#include "libssh/pki_priv.h"
+#include "libssh/pki_sk.h"
+#include "libssh/priv.h"
+#include "libssh/session.h"
+#include "libssh/sk_common.h" /* For SK_NOT_SUPPORTED_MSG */
 
 #ifndef MAX_LINE_SIZE
 #define MAX_LINE_SIZE 4096
@@ -166,6 +169,13 @@ ssh_key pki_key_dup_common_init(const ssh_key key, int demote)
             goto fail;
         }
 
+        if (key->sk_user_id != NULL) {
+            new->sk_user_id = ssh_string_copy(key->sk_user_id);
+            if (new->sk_user_id == NULL) {
+                goto fail;
+            }
+        }
+
         if (!demote) {
             new->sk_flags = key->sk_flags;
 
@@ -232,6 +242,8 @@ void ssh_key_clean (ssh_key key)
         ssh_string_free(key->sk_key_handle);
         ssh_string_burn(key->sk_reserved);
         ssh_string_free(key->sk_reserved);
+        ssh_string_burn(key->sk_user_id);
+        ssh_string_free(key->sk_user_id);
         key->sk_flags = 0;
     }
     key->cert_type = SSH_KEYTYPE_UNKNOWN;
@@ -270,6 +282,74 @@ enum ssh_keytypes_e ssh_key_type(const ssh_key key)
         return SSH_KEYTYPE_UNKNOWN;
     }
     return key->type;
+}
+
+/**
+ * @brief Get security key (FIDO2) flags for a security key backed ssh_key.
+ *
+ * The returned value contains a bitmask of SSH_SK_* flags (e.g.
+ * SSH_SK_USER_PRESENCE_REQD, SSH_SK_USER_VERIFICATION_REQD, etc.).
+ * If NULL is passed, then 0 is returned.
+ *
+ * @param[in] key  The ssh_key handle.
+ *
+ * @return Bitmask of security key flags, or 0 if not applicable.
+ */
+uint32_t ssh_key_get_sk_flags(const ssh_key key)
+{
+    if (key == NULL) {
+        return 0;
+    }
+    return key->sk_flags;
+}
+
+/**
+ * @brief Get the application (RP ID) associated with a security key.
+ *
+ * This function returns a freshly allocated ssh_string containing a copy of the
+ * application (RP ID). The caller owns the returned ssh_string and must free it
+ * with SSH_STRING_FREE() when no longer needed.
+ *
+ * Returns NULL if the key is NULL, not a security key type or if the field is
+ * not set.
+ *
+ * @param[in] key  The ssh_key handle.
+ *
+ * @return ssh_string copy of the application (RP ID) or NULL if not available.
+ */
+ssh_string ssh_key_get_sk_application(const ssh_key key)
+{
+    if (key == NULL || key->sk_application == NULL) {
+        return NULL;
+    }
+
+    return ssh_string_copy(key->sk_application);
+}
+
+/**
+ * @brief Get a copy of the user ID associated with a resident security key
+ * credential.
+ *
+ * For resident (discoverable) credentials, authenticators may provide a user
+ * id which can be arbitrary binary data to allow for storing multiple keys for
+ * the same Relying Party. This function returns a freshly allocated ssh_string
+ * containing a copy of that user id. The caller owns the returned ssh_string
+ * and must free it with SSH_STRING_FREE() when no longer needed.
+ *
+ * @note This function will only return useful information if the ssh_key
+ * passed represents a resident key loaded using the ssh_sk_resident_keys_load()
+ * function.
+ *
+ * @param[in] key  The ssh_key handle.
+ *
+ * @return ssh_string copy of user id or NULL if not available.
+ */
+ssh_string ssh_key_get_sk_user_id(const ssh_key key)
+{
+    if (key == NULL) {
+        return NULL;
+    }
+    return ssh_string_copy(key->sk_user_id);
 }
 
 /**
@@ -784,6 +864,10 @@ int ssh_key_cmp(const ssh_key k1,
 
     if (is_sk_key_type(k1->type)) {
         if (ssh_string_cmp(k1->sk_application, k2->sk_application) != 0) {
+            return 1;
+        }
+
+        if (ssh_string_cmp(k1->sk_user_id, k2->sk_user_id) != 0) {
             return 1;
         }
 
@@ -2176,7 +2260,9 @@ int ssh_pki_import_cert_file(const char *filename, ssh_key *pkey)
 }
 
 /**
- * @brief Generates a key pair.
+ * @internal
+ *
+ * @brief Internal function to generate a key pair.
  *
  * @param[in] type      Type of key to create
  *
@@ -2187,17 +2273,19 @@ int ssh_pki_import_cert_file(const char *filename, ssh_key *pkey)
  *                      to free the memory using ssh_key_free().
  *
  * @return              SSH_OK on success, SSH_ERROR on error.
- *
- * @warning             Generating a key pair may take some time.
- *
- * @see ssh_key_free()
  */
-int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
-        ssh_key *pkey)
+static int pki_generate_key_internal(enum ssh_keytypes_e type,
+                                     int parameter,
+                                     ssh_key *pkey)
 {
     int rc;
-    ssh_key key = ssh_key_new();
+    ssh_key key = NULL;
 
+    if (pkey == NULL) {
+        return SSH_ERROR;
+    }
+
+    key = ssh_key_new();
     if (key == NULL) {
         return SSH_ERROR;
     }
@@ -2208,6 +2296,15 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
 
     switch(type){
         case SSH_KEYTYPE_RSA:
+            if (parameter != 0 && parameter < RSA_MIN_KEY_SIZE) {
+                SSH_LOG(
+                    SSH_LOG_WARN,
+                    "RSA key size parameter (%d) is below minimum allowed (%d)",
+                    parameter,
+                    RSA_MIN_KEY_SIZE);
+                goto error;
+            }
+
             rc = pki_key_generate_rsa(key, parameter);
             if(rc == SSH_ERROR)
                 goto error;
@@ -2267,6 +2364,105 @@ int ssh_pki_generate(enum ssh_keytypes_e type, int parameter,
 error:
     ssh_key_free(key);
     return SSH_ERROR;
+}
+
+/**
+ * @brief Generates a key pair.
+ *
+ * @param[in] type      Type of key to create
+ *
+ * @param[in] parameter Parameter to the creation of key:
+ *                      rsa : length of the key in bits (e.g. 1024, 2048, 4096)
+ *                      If parameter is 0, then the default size will be used.
+ * @param[out] pkey     A pointer to store the allocated private key. You need
+ *                      to free the memory using ssh_key_free().
+ *
+ * @return              SSH_OK on success, SSH_ERROR on error.
+ *
+ * @warning             Generating a key pair may take some time.
+ *
+ * @see ssh_key_free()
+ */
+int ssh_pki_generate(enum ssh_keytypes_e type, int parameter, ssh_key *pkey)
+{
+    return pki_generate_key_internal(type, parameter, pkey);
+}
+
+/**
+ * @brief Generates a key pair.
+ *
+ * @param[in] type        Type of key to create
+ *
+ * @param[in] pki_context PKI context containing various configuration
+ *                        parameters and sub-contexts. Can be NULL for
+ *                        standard SSH key types (RSA, ECDSA, ED25519) where
+ *                        defaults will be used. Can also be NULL for security
+ *                        key types (SK_*), in which case default callbacks and
+ *                        settings will be used automatically.
+ *
+ * @param[out] pkey       A pointer to store the allocated private key. You need
+ *                        to free the memory using ssh_key_free().
+ *
+ * @return              SSH_OK on success, SSH_ERROR on error.
+ *
+ * @see ssh_pki_ctx_new()
+ * @see ssh_key_free()
+ */
+int ssh_pki_generate_key(enum ssh_keytypes_e type,
+                         ssh_pki_ctx pki_context,
+                         ssh_key *pkey)
+{
+
+    /* Handle Security Key types with the specialized function */
+    if (is_sk_key_type(type)) {
+#ifdef WITH_FIDO2
+        ssh_pki_ctx temp_ctx = NULL;
+        ssh_pki_ctx ctx_to_use = pki_context;
+        int rc;
+
+        /* If no context provided, create a temporary default one */
+        if (pki_context == NULL) {
+            SSH_LOG(SSH_LOG_INFO,
+                    "No PKI context provided, using the default one");
+
+            temp_ctx = ssh_pki_ctx_new();
+            if (temp_ctx == NULL) {
+                SSH_LOG(SSH_LOG_WARN, "Failed to create temporary PKI context");
+                return SSH_ERROR;
+            }
+            ctx_to_use = temp_ctx;
+        }
+
+        /* Verify that we have valid SK callbacks */
+        if (ctx_to_use->sk_callbacks == NULL) {
+            SSH_LOG(SSH_LOG_WARN, "Missing SK callbacks in PKI context");
+            if (temp_ctx != NULL) {
+                SSH_PKI_CTX_FREE(temp_ctx);
+            }
+            return SSH_ERROR;
+        }
+
+        rc = pki_sk_enroll_key(ctx_to_use, type, pkey);
+
+        /* Clean up temporary context if we created one */
+        if (temp_ctx != NULL) {
+            SSH_PKI_CTX_FREE(temp_ctx);
+        }
+
+        return rc;
+#else  /* WITH_FIDO2 */
+        SSH_LOG(SSH_LOG_WARN, SK_NOT_SUPPORTED_MSG);
+        return SSH_ERROR;
+#endif /* WITH_FIDO2 */
+    } else {
+        int parameter = 0;
+
+        if (type == SSH_KEYTYPE_RSA && pki_context != NULL) {
+            parameter = pki_context->rsa_key_size;
+        }
+
+        return pki_generate_key_internal(type, parameter, pkey);
+    }
 }
 
 /**
@@ -3219,9 +3415,15 @@ cleanup:
  * @param data            The data to sign
  * @param data_length     The length of the data
  * @param privkey         The private key to sign with
+ * @param pki_context     The PKI context. For non-SK keys, this parameter is
+ *                        ignored and can be NULL. For SK keys, can be NULL in
+ *                        which case a default context with default callbacks
+ *                        will be used. If provided, the context must have
+ *                        sk_callbacks set with a valid sign callback
+ *                        implementation. See ssh_pki_ctx_set_sk_callbacks().
+ * @param sig_namespace   The signature namespace (e.g. "file", "email", etc.)
  * @param hash_alg        The hash algorithm to use (SSHSIG_DIGEST_SHA2_256 or
  *                        SSHSIG_DIGEST_SHA2_512)
- * @param sig_namespace   The signature namespace (e.g. "file", "email", etc.)
  * @param signature       Pointer to store the allocated signature string in the
  *                        armored format. Must be freed with
  *                        ssh_string_free_char()
@@ -3231,6 +3433,7 @@ cleanup:
 int sshsig_sign(const void *data,
                 size_t data_length,
                 ssh_key privkey,
+                ssh_pki_ctx pki_context,
                 const char *sig_namespace,
                 enum sshsig_digest_e hash_alg,
                 char **signature)
@@ -3240,6 +3443,8 @@ int sshsig_sign(const void *data,
     ssh_signature sig = NULL;
     ssh_string sig_string = NULL;
     ssh_string pub_blob = NULL;
+    ssh_pki_ctx temp_ctx = NULL;
+    ssh_pki_ctx ctx_to_use = NULL;
     enum ssh_digest_e digest_type;
     const char *hash_alg_str = NULL;
     int rc = SSH_ERROR;
@@ -3255,6 +3460,31 @@ int sshsig_sign(const void *data,
                 "Invalid parameters provided to sshsig_sign: empty namespace "
                 "string");
         return SSH_ERROR;
+    }
+
+    /* Check if this is an SK key that requires a PKI context */
+    if (is_sk_key_type(privkey->type)) {
+        /* If no context provided, create a temporary default one */
+        if (pki_context == NULL) {
+            SSH_LOG(SSH_LOG_INFO,
+                    "No PKI context provided, using the default one");
+
+            temp_ctx = ssh_pki_ctx_new();
+            if (temp_ctx == NULL) {
+                SSH_LOG(SSH_LOG_WARN, "Failed to create temporary PKI context");
+                return SSH_ERROR;
+            }
+            ctx_to_use = temp_ctx;
+        } else {
+            ctx_to_use = pki_context;
+        }
+
+        /* Verify that we have valid SK callbacks */
+        if (ctx_to_use->sk_callbacks == NULL) {
+            SSH_LOG(SSH_LOG_WARN,
+                    "Security Key callbacks not configured in PKI context");
+            goto cleanup;
+        }
     }
 
     *signature = NULL;
@@ -3278,11 +3508,24 @@ int sshsig_sign(const void *data,
         goto cleanup;
     }
 
-    digest_type = key_type_to_hash(ssh_key_type_plain(privkey->type));
-    sig = pki_sign_data(privkey,
-                        digest_type,
-                        ssh_buffer_get(tosign),
-                        ssh_buffer_get_len(tosign));
+    /* Use appropriate signing method based on key type */
+    if (is_sk_key_type(privkey->type)) {
+#ifdef WITH_FIDO2
+        sig = pki_sk_do_sign(ctx_to_use,
+                             privkey,
+                             ssh_buffer_get(tosign),
+                             ssh_buffer_get_len(tosign));
+#else
+        SSH_LOG(SSH_LOG_WARN, SK_NOT_SUPPORTED_MSG);
+        goto cleanup;
+#endif
+    } else {
+        digest_type = key_type_to_hash(ssh_key_type_plain(privkey->type));
+        sig = pki_sign_data(privkey,
+                            digest_type,
+                            ssh_buffer_get(tosign),
+                            ssh_buffer_get_len(tosign));
+    }
     if (sig == NULL) {
         SSH_LOG(SSH_LOG_TRACE, "Failed to sign data with private key");
         goto cleanup;
@@ -3333,6 +3576,11 @@ cleanup:
     SSH_SIGNATURE_FREE(sig);
     SSH_STRING_FREE(sig_string);
     SSH_STRING_FREE(pub_blob);
+
+    /* Clean up temporary context if we created one */
+    if (temp_ctx != NULL) {
+        SSH_PKI_CTX_FREE(temp_ctx);
+    }
 
     return rc;
 }
@@ -3469,10 +3717,29 @@ int sshsig_verify(const void *data,
         goto cleanup;
     }
 
-    rc = pki_verify_data_signature(signature_obj,
-                                   key,
-                                   ssh_buffer_get(tosign),
-                                   ssh_buffer_get_len(tosign));
+    if (is_sk_key_type(key->type)) {
+        ssh_buffer sk_buffer = NULL;
+        rc = pki_sk_signature_buffer_prepare(key,
+                                             signature_obj,
+                                             ssh_buffer_get(tosign),
+                                             ssh_buffer_get_len(tosign),
+                                             &sk_buffer);
+        if (rc != SSH_OK) {
+            SSH_LOG(SSH_LOG_TRACE, "Failed to prepare sk signature buffer");
+            goto cleanup;
+        }
+
+        rc = pki_verify_data_signature(signature_obj,
+                                       key,
+                                       ssh_buffer_get(sk_buffer),
+                                       ssh_buffer_get_len(sk_buffer));
+        SSH_BUFFER_FREE(sk_buffer);
+    } else {
+        rc = pki_verify_data_signature(signature_obj,
+                                       key,
+                                       ssh_buffer_get(tosign),
+                                       ssh_buffer_get_len(tosign));
+    }
     if (rc != SSH_OK) {
         SSH_LOG(SSH_LOG_TRACE, "Signature verification failed");
         goto cleanup;
@@ -3555,10 +3822,38 @@ ssh_string ssh_pki_do_sign(ssh_session session,
     }
 
     /* Generate the signature */
-    sig = pki_do_sign(privkey,
-            ssh_buffer_get(sign_input),
-            ssh_buffer_get_len(sign_input),
-            hash_type);
+    if (is_sk_key_type(privkey->type)) {
+#ifdef WITH_FIDO2
+        if (session->pki_context == NULL ||
+            session->pki_context->sk_callbacks == NULL) {
+            SSH_LOG(SSH_LOG_WARN, "Missing PKI context or SK callbacks");
+            goto end;
+        }
+
+        rc = pki_key_check_hash_compatible(privkey, hash_type);
+        if (rc != SSH_OK) {
+            SSH_LOG(SSH_LOG_WARN,
+                    "Incompatible hash type %d for sk key type %d",
+                    hash_type,
+                    privkey->type);
+            goto end;
+        }
+
+        sig = pki_sk_do_sign(session->pki_context,
+                             privkey,
+                             ssh_buffer_get(sign_input),
+                             ssh_buffer_get_len(sign_input));
+#else
+        SSH_LOG(SSH_LOG_WARN, SK_NOT_SUPPORTED_MSG);
+        goto end;
+#endif /* WITH_FIDO2 */
+    } else {
+        sig = pki_do_sign(privkey,
+                          ssh_buffer_get(sign_input),
+                          ssh_buffer_get_len(sign_input),
+                          hash_type);
+    }
+
     if (sig == NULL) {
         goto end;
     }
