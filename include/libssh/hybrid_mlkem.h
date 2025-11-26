@@ -1,7 +1,11 @@
 /*
  * This file is part of the SSH Library
  *
- * Copyright (c) 2011 by Aris Adamantiadis
+ * Copyright (c) 2025 by Red Hat, Inc.
+ *
+ * Author: Sahana Prasad <sahana@redhat.com>
+ * Author: Pavol Žáčik <pzacik@redhat.com>
+ * Author: Claude (Anthropic)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,49 +22,27 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef ECDH_H_
-#define ECDH_H_
+#ifndef HYBRID_MLKEM_H_
+#define HYBRID_MLKEM_H_
+
+#include "libssh/mlkem.h"
+#include "libssh/wrapper.h"
 
 #include "config.h"
-#include "libssh/callbacks.h"
-
-#ifdef HAVE_LIBCRYPTO
-#ifdef HAVE_OPENSSL_ECDH_H
-
-#ifdef HAVE_ECC
-#define HAVE_ECDH 1
-#endif
-
-#endif /* HAVE_OPENSSL_ECDH_H */
-#endif /* HAVE_LIBCRYPTO */
-
-#ifdef HAVE_GCRYPT_ECC
-#define HAVE_ECDH 1
-#endif
-
-#ifdef HAVE_LIBMBEDCRYPTO
-#define HAVE_ECDH 1
-#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern struct ssh_packet_callbacks_struct ssh_ecdh_client_callbacks;
-/* Backend-specific functions.  */
-int ssh_ecdh_init(ssh_session session);
-int ssh_client_ecdh_init(ssh_session session);
-void ssh_client_ecdh_remove_callbacks(ssh_session session);
-int ecdh_build_k(ssh_session session);
+int ssh_client_hybrid_mlkem_init(ssh_session session);
+void ssh_client_hybrid_mlkem_remove_callbacks(ssh_session session);
 
 #ifdef WITH_SERVER
-extern struct ssh_packet_callbacks_struct ssh_ecdh_server_callbacks;
-void ssh_server_ecdh_init(ssh_session session);
-SSH_PACKET_CALLBACK(ssh_packet_server_ecdh_init);
+void ssh_server_hybrid_mlkem_init(ssh_session session);
 #endif /* WITH_SERVER */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ECDH_H_ */
+#endif /* HYBRID_MLKEM_H_ */
