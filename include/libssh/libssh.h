@@ -1,7 +1,7 @@
 /*
  * This file is part of the SSH Library
  *
- * Copyright (c) 2003-2025 by Aris Adamantiadis and the libssh team
+ * Copyright (c) 2003-2026 by Aris Adamantiadis and the libssh team
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -152,13 +152,14 @@ enum ssh_auth_e {
 };
 
 /* auth flags */
-#define SSH_AUTH_METHOD_UNKNOWN     0x0000u
-#define SSH_AUTH_METHOD_NONE        0x0001u
-#define SSH_AUTH_METHOD_PASSWORD    0x0002u
-#define SSH_AUTH_METHOD_PUBLICKEY   0x0004u
-#define SSH_AUTH_METHOD_HOSTBASED   0x0008u
-#define SSH_AUTH_METHOD_INTERACTIVE 0x0010u
-#define SSH_AUTH_METHOD_GSSAPI_MIC  0x0020u
+#define SSH_AUTH_METHOD_UNKNOWN      0x0000u
+#define SSH_AUTH_METHOD_NONE         0x0001u
+#define SSH_AUTH_METHOD_PASSWORD     0x0002u
+#define SSH_AUTH_METHOD_PUBLICKEY    0x0004u
+#define SSH_AUTH_METHOD_HOSTBASED    0x0008u
+#define SSH_AUTH_METHOD_INTERACTIVE  0x0010u
+#define SSH_AUTH_METHOD_GSSAPI_MIC   0x0020u
+#define SSH_AUTH_METHOD_GSSAPI_KEYEX 0x0040u
 
 /* messages */
 enum ssh_requests_e {
@@ -371,6 +372,12 @@ enum ssh_control_master_options_e {
   SSH_CONTROL_MASTER_AUTOASK
 };
 
+enum ssh_address_family_options_e {
+    SSH_ADDRESS_FAMILY_ANY,
+    SSH_ADDRESS_FAMILY_INET,
+    SSH_ADDRESS_FAMILY_INET6
+};
+
 enum ssh_options_e {
     SSH_OPTIONS_HOST,
     SSH_OPTIONS_PORT,
@@ -422,6 +429,9 @@ enum ssh_options_e {
     SSH_OPTIONS_PROXYJUMP,
     SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND,
     SSH_OPTIONS_PKI_CONTEXT,
+    SSH_OPTIONS_ADDRESS_FAMILY,
+    SSH_OPTIONS_GSSAPI_KEY_EXCHANGE,
+    SSH_OPTIONS_GSSAPI_KEY_EXCHANGE_ALGS,
 };
 
 enum {

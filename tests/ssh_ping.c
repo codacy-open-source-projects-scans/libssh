@@ -29,6 +29,9 @@ int main(int argc, char **argv)
     const char *hostkeys = NULL;
     const char *kex = NULL;
     int rc = 1;
+#ifdef WITH_GSSAPI
+    bool t = true;
+#endif /* WITH_GSSAPI */
 
     bool process_config = false;
 
@@ -74,6 +77,13 @@ int main(int argc, char **argv)
     if (rc < 0) {
         goto out;
     }
+
+#ifdef WITH_GSSAPI
+    rc = ssh_options_set(session, SSH_OPTIONS_GSSAPI_KEY_EXCHANGE, &t);
+    if (rc < 0) {
+        goto out;
+    }
+#endif /* WITH_GSSAPI */
 
     rc = ssh_connect(session);
     if (rc != SSH_OK) {

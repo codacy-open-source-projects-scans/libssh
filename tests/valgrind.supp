@@ -241,6 +241,25 @@
    Memcheck:Leak
    match-leak-kinds: reachable
    fun:malloc
+   ...
+   fun:__nss_module_get_function
+   ...
+   fun:getaddrinfo
+   ...
+   fun:torture_*
+   ...
+   fun:_cmocka_run_group_tests
+   fun:torture_run_tests
+   fun:main
+}
+## libkrb5
+# krb5_mcc_generate_new allocates a hashtab on a static global variable
+# It doesn't get freed.
+{
+   Reachable memory from getaddrinfo
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
    fun:malloc
    fun:strdup
    fun:_dl_load_cache_lookup
@@ -254,22 +273,12 @@
    fun:_dl_catch_exception
    fun:_dl_catch_error
    fun:dlerror_run
-   fun:__libc_dlopen_mode
-   fun:module_load
-   fun:__nss_module_get_function
+   ...
    fun:getaddrinfo
    ...
-   fun:krb5_sname_to_principal
-   ...
    fun:gss_init_sec_context
-   fun:ssh_packet_userauth_gssapi_response
-   fun:ssh_packet_process
-   fun:ssh_packet_socket_callback
-   fun:ssh_socket_pollcallback
-   fun:ssh_poll_ctx_dopoll
-   fun:ssh_handle_packets
-   fun:ssh_handle_packets_termination
-   fun:ssh_userauth_get_response
+   fun:ssh_gssapi_init_ctx
+   ...
    fun:ssh_userauth_gssapi
    fun:torture_gssapi_auth_server_identity
    ...
@@ -282,22 +291,26 @@
    Reachable memory from getaddrinfo
    Memcheck:Leak
    match-leak-kinds: reachable
-   ...
-   fun:__nss_module_get_function
+   fun:malloc
+   fun:UnknownInlinedFun
+   fun:_dl_new_object
+   fun:_dl_map_object_from_fd
+   fun:_dl_map_object
+   fun:dl_open_worker_begin
+   fun:_dl_catch_exception
+   fun:dl_open_worker
+   fun:_dl_catch_exception
+   fun:_dl_open
+   fun:do_dlopen
+   fun:_dl_catch_exception
+   fun:_dl_catch_error
+   fun:dlerror_run
    ...
    fun:getaddrinfo
    ...
-   fun:krb5_sname_to_principal
-   ...
    fun:gss_init_sec_context
-   fun:ssh_packet_userauth_gssapi_response
-   fun:ssh_packet_process
-   fun:ssh_packet_socket_callback
-   fun:ssh_socket_pollcallback
-   fun:ssh_poll_ctx_dopoll
-   fun:ssh_handle_packets
-   fun:ssh_handle_packets_termination
-   fun:ssh_userauth_get_response
+   fun:ssh_gssapi_init_ctx
+   ...
    fun:ssh_userauth_gssapi
    fun:torture_gssapi_auth_server_identity
    ...
@@ -305,9 +318,7 @@
    fun:torture_run_tests
    fun:main
 }
-## libkrb5
-# krb5_mcc_generate_new allocates a hashtab on a static global variable
-# It doesn't get freed.
+
 {
    Reachable memory from libkrb5
    Memcheck:Leak
@@ -355,4 +366,58 @@
    fun:sk_enroll
    fun:pki_sk_enroll_key
    ...
+}
+
+
+{
+   malloc inside expand_hostname
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   ...
+   fun:expand_hostname
+   fun:canonicalize_princ
+   fun:krb5_sname_to_principal
+   fun:krb5_gss_import_name
+   fun:gssint_import_internal_name
+   fun:gss_init_sec_context
+   fun:ssh_gssapi_init_ctx
+}
+{
+   malloc in krb5_build_principal
+   Memcheck:Leak
+   match-leak-kinds: indirect
+   fun:malloc
+   ...
+   fun:krb5_build_principal_alloc_va
+   fun:krb5_build_principal
+   ...
+   fun:gss_add_cred_from
+   fun:gss_acquire_cred_from
+   fun:gss_acquire_cred
+}
+{
+   malloc in krb5_build_principal
+   Memcheck:Leak
+   match-leak-kinds: indirect,definite
+   fun:malloc
+   fun:krb5_build_principal_alloc_va
+   fun:krb5_build_principal
+   ...
+   fun:gss_add_cred_from
+   fun:gss_acquire_cred_from
+   fun:gss_acquire_cred
+}
+{
+   calloc in krb5_build_principal
+   Memcheck:Leak
+   match-leak-kinds: indirect
+   fun:calloc
+   ...
+   fun:krb5_build_principal_alloc_va
+   fun:krb5_build_principal
+   ...
+   fun:gss_add_cred_from
+   fun:gss_acquire_cred_from
+   fun:gss_acquire_cred
 }

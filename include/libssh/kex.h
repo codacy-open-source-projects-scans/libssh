@@ -31,6 +31,9 @@ struct ssh_kex_struct {
     char *methods[SSH_KEX_METHODS];
 };
 
+/* crypto.h needs ssh_kex_struct so it is included below the struct definition */
+#include "libssh/crypto.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,6 +67,7 @@ int ssh_make_sessionid(ssh_session session);
 int ssh_hashbufin_add_cookie(ssh_session session, unsigned char *cookie);
 int ssh_hashbufout_add_cookie(ssh_session session);
 int ssh_generate_session_keys(ssh_session session);
+bool ssh_kex_is_gss(struct ssh_crypto_struct *crypto);
 
 #ifdef __cplusplus
 }

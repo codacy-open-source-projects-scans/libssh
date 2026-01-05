@@ -91,7 +91,7 @@ static struct ssh_config_keyword_table_s ssh_config_keyword_table[] = {
     {"passwordauthentication", SOC_PASSWORDAUTHENTICATION, true},
     {"pubkeyauthentication", SOC_PUBKEYAUTHENTICATION, true},
     {"addkeystoagent", SOC_UNSUPPORTED, true},
-    {"addressfamily", SOC_UNSUPPORTED, true},
+    {"addressfamily", SOC_ADDRESSFAMILY, true},
     {"batchmode", SOC_UNSUPPORTED, true},
     {"canonicaldomains", SOC_UNSUPPORTED, true},
     {"canonicalizefallbacklocal", SOC_UNSUPPORTED, true},
@@ -155,6 +155,8 @@ static struct ssh_config_keyword_table_s ssh_config_keyword_table[] = {
     {"xauthlocation", SOC_NA, true},
     {"pubkeyacceptedkeytypes", SOC_PUBKEYACCEPTEDKEYTYPES, true},
     {"requiredrsasize", SOC_REQUIRED_RSA_SIZE, true},
+    {"gssapikeyexchange", SOC_GSSAPIKEYEXCHANGE, true},
+    {"gssapikexalgorithms", SOC_GSSAPIKEXALGORITHMS, true},
     {NULL, SOC_UNKNOWN, false},
 };
 
@@ -1557,11 +1559,56 @@ static int ssh_config_parse_line_internal(ssh_session session,
             ssh_options_set(session, SSH_OPTIONS_CERTIFICATE, p);
         }
         break;
+    case SOC_GSSAPIKEYEXCHANGE: {
+        i = ssh_config_get_yesno(&s, -1);
+        CHECK_COND_OR_FAIL(i < 0, "Invalid argument");
+        if (*parsing) {
+            bool b = (i == 1) ? true : false;
+            ssh_options_set(session, SSH_OPTIONS_GSSAPI_KEY_EXCHANGE, &b);
+        }
+        break;
+    }
+    case SOC_GSSAPIKEXALGORITHMS:
+        p = ssh_config_get_str_tok(&s, NULL);
+        CHECK_COND_OR_FAIL(p == NULL, "Missing argument");
+        if (*parsing) {
+            ssh_options_set(session, SSH_OPTIONS_GSSAPI_KEY_EXCHANGE_ALGS, p);
+        }
+        break;
     case SOC_REQUIRED_RSA_SIZE:
         l = ssh_config_get_long(&s, -1);
         CHECK_COND_OR_FAIL(l < 0, "Invalid argument");
         if (*parsing) {
             ssh_options_set(session, SSH_OPTIONS_RSA_MIN_SIZE, &l);
+        }
+        break;
+    case SOC_ADDRESSFAMILY:
+        p = ssh_config_get_str_tok(&s, NULL);
+        if (p == NULL) {
+            SSH_LOG(SSH_LOG_WARNING,
+                    "line %d: no argument after keyword \"addressfamily\"",
+                    count);
+            SAFE_FREE(x);
+            return SSH_ERROR;
+        }
+        if (*parsing) {
+            int value = -1;
+
+            if (strcasecmp(p, "any") == 0) {
+                value = SSH_ADDRESS_FAMILY_ANY;
+            } else if (strcasecmp(p, "inet") == 0) {
+                value = SSH_ADDRESS_FAMILY_INET;
+            } else if (strcasecmp(p, "inet6") == 0) {
+                value = SSH_ADDRESS_FAMILY_INET6;
+            } else {
+                SSH_LOG(SSH_LOG_WARNING,
+                        "line %d: invalid argument \"%s\"",
+                        count,
+                        p);
+                SAFE_FREE(x);
+                return SSH_ERROR;
+            }
+            ssh_options_set(session, SSH_OPTIONS_ADDRESS_FAMILY, &value);
         }
         break;
     default:

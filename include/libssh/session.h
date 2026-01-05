@@ -58,16 +58,17 @@ enum ssh_dh_state_e {
 };
 
 enum ssh_pending_call_e {
-	SSH_PENDING_CALL_NONE = 0,
-	SSH_PENDING_CALL_CONNECT,
-	SSH_PENDING_CALL_AUTH_NONE,
-	SSH_PENDING_CALL_AUTH_PASSWORD,
-	SSH_PENDING_CALL_AUTH_OFFER_PUBKEY,
-	SSH_PENDING_CALL_AUTH_PUBKEY,
-	SSH_PENDING_CALL_AUTH_AGENT,
-	SSH_PENDING_CALL_AUTH_KBDINT_INIT,
-	SSH_PENDING_CALL_AUTH_KBDINT_SEND,
-	SSH_PENDING_CALL_AUTH_GSSAPI_MIC
+    SSH_PENDING_CALL_NONE = 0,
+    SSH_PENDING_CALL_CONNECT,
+    SSH_PENDING_CALL_AUTH_NONE,
+    SSH_PENDING_CALL_AUTH_PASSWORD,
+    SSH_PENDING_CALL_AUTH_OFFER_PUBKEY,
+    SSH_PENDING_CALL_AUTH_PUBKEY,
+    SSH_PENDING_CALL_AUTH_AGENT,
+    SSH_PENDING_CALL_AUTH_KBDINT_INIT,
+    SSH_PENDING_CALL_AUTH_KBDINT_SEND,
+    SSH_PENDING_CALL_AUTH_GSSAPI_MIC,
+    SSH_PENDING_CALL_AUTH_GSSAPI_KEYEX,
 };
 
 /* libssh calls may block an undefined amount of time */
@@ -201,6 +202,8 @@ struct ssh_session_struct {
      */
     bool first_kex_follows_guess_wrong;
 
+    ssh_string gssapi_key_exchange_mic;
+
     ssh_buffer in_hashbuf;
     ssh_buffer out_hashbuf;
     struct ssh_crypto_struct *current_crypto;
@@ -265,6 +268,8 @@ struct ssh_session_struct {
         char compressionlevel;
         char *gss_server_identity;
         char *gss_client_identity;
+        bool gssapi_key_exchange;
+        char *gssapi_key_exchange_algs;
         int gss_delegate_creds;
         int flags;
         int exp_flags;
@@ -277,6 +282,7 @@ struct ssh_session_struct {
         bool identities_only;
         int control_master;
         char *control_path;
+        int address_family;
     } opts;
 
     /* server options */

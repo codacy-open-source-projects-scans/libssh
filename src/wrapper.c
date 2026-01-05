@@ -49,6 +49,7 @@
 #include "libssh/dh-gex.h"
 #endif /* WITH_GEX */
 #include "libssh/curve25519.h"
+#include "libssh/kex-gss.h"
 #include "libssh/ecdh.h"
 #include "libssh/sntrup761.h"
 #ifdef HAVE_MLKEM
@@ -587,6 +588,14 @@ int crypt_set_algorithms_server(ssh_session session){
     case SSH_KEX_DH_GROUP18_SHA512:
       ssh_server_dh_init(session);
       break;
+#ifdef WITH_GSSAPI
+    case SSH_GSS_KEX_DH_GROUP14_SHA256:
+    case SSH_GSS_KEX_DH_GROUP16_SHA512:
+    case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
+    case SSH_GSS_KEX_CURVE25519_SHA256:
+        ssh_server_gss_kex_init(session);
+        break;
+#endif /* WITH_GSSAPI */
 #ifdef WITH_GEX
     case SSH_KEX_DH_GEX_SHA1:
     case SSH_KEX_DH_GEX_SHA256:

@@ -657,6 +657,8 @@ void torture_setup_socket_dir(void **state)
 
     snprintf(s->srv_config, len, "%s/%s", p, TORTURE_SSHD_CONFIG);
 
+    s->disable_hostkeys = false;
+
     setenv("SOCKET_WRAPPER_DIR", p, 1);
     setenv("SOCKET_WRAPPER_DEFAULT_IFACE", "170", 1);
     env = getenv("TORTURE_GENERATE_PCAP");
@@ -817,9 +819,9 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
         "Port 22\n"
         "ListenAddress %s\n"
         "ListenAddress %s\n"
-        "HostKey %s\n" /* ed25519 HostKey */
-        "HostKey %s\n" /* RSA HostKey */
-        "HostKey %s\n" /* ECDSA HostKey */
+        "%s %s\n" /* ed25519 HostKey */
+        "%s %s\n" /* RSA HostKey */
+        "%s %s\n" /* ECDSA HostKey */
         "\n"
         "TrustedUserCAKeys %s\n"
         "\n"
@@ -858,8 +860,8 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
         "Port 22\n"
         "ListenAddress %s\n"
         "ListenAddress %s\n"
-        "HostKey %s\n" /* RSA HostKey */
-        "HostKey %s\n" /* ECDSA HostKey */
+        "%s %s\n" /* RSA HostKey */
+        "%s %s\n" /* ECDSA HostKey */
         "\n"
         "TrustedUserCAKeys %s\n" /* Trusted CA */
         "\n"
@@ -997,8 +999,8 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
                  fips_config_string,
                  second_sshd ? TORTURE_SSHD_SRV1_IPV4 : TORTURE_SSHD_SRV_IPV4,
                  second_sshd ? TORTURE_SSHD_SRV1_IPV6 : TORTURE_SSHD_SRV_IPV6,
-                 rsa_hostkey,
-                 ecdsa_hostkey,
+                 s->disable_hostkeys ? "" : "HostKey", s->disable_hostkeys ? "" : rsa_hostkey,
+                 s->disable_hostkeys ? "" : "HostKey", s->disable_hostkeys ? "" : ecdsa_hostkey,
                  trusted_ca_pubkey,
                  sftp_server,
                  usepam,
@@ -1010,9 +1012,9 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
                  config_string,
                  second_sshd ? TORTURE_SSHD_SRV1_IPV4 : TORTURE_SSHD_SRV_IPV4,
                  second_sshd ? TORTURE_SSHD_SRV1_IPV6 : TORTURE_SSHD_SRV_IPV6,
-                 ed25519_hostkey,
-                 rsa_hostkey,
-                 ecdsa_hostkey,
+                 s->disable_hostkeys ? "" : "HostKey", s->disable_hostkeys ? "" : ed25519_hostkey,
+                 s->disable_hostkeys ? "" : "HostKey", s->disable_hostkeys ? "" : rsa_hostkey,
+                 s->disable_hostkeys ? "" : "HostKey", s->disable_hostkeys ? "" : ecdsa_hostkey,
                  trusted_ca_pubkey,
                  sftp_server,
                  usepam,

@@ -30,14 +30,15 @@
 #include <arpa/inet.h>
 #endif
 
-#include "libssh/priv.h"
-#include "libssh/ssh2.h"
 #include "libssh/buffer.h"
-#include "libssh/packet.h"
-#include "libssh/options.h"
-#include "libssh/socket.h"
-#include "libssh/session.h"
+#include "libssh/kex-gss.h"
 #include "libssh/dh.h"
+#include "libssh/options.h"
+#include "libssh/packet.h"
+#include "libssh/priv.h"
+#include "libssh/session.h"
+#include "libssh/socket.h"
+#include "libssh/ssh2.h"
 #ifdef WITH_GEX
 #include "libssh/dh-gex.h"
 #endif /* WITH_GEX */
@@ -267,6 +268,14 @@ int dh_handshake(ssh_session session)
     switch (session->dh_handshake_state) {
     case DH_STATE_INIT:
         switch (session->next_crypto->kex_type) {
+#ifdef WITH_GSSAPI
+        case SSH_GSS_KEX_DH_GROUP14_SHA256:
+        case SSH_GSS_KEX_DH_GROUP16_SHA512:
+        case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
+        case SSH_GSS_KEX_CURVE25519_SHA256:
+            rc = ssh_client_gss_kex_init(session);
+            break;
+#endif
         case SSH_KEX_DH_GROUP1_SHA1:
         case SSH_KEX_DH_GROUP14_SHA1:
         case SSH_KEX_DH_GROUP14_SHA256:
@@ -915,7 +924,7 @@ error:
  */
 const char *ssh_copyright(void)
 {
-    return SSH_STRINGIFY(LIBSSH_VERSION) " (c) 2003-2025 "
+    return SSH_STRINGIFY(LIBSSH_VERSION) " (c) 2003-2026 "
            "Aris Adamantiadis, Andreas Schneider "
            "and libssh contributors. "
            "Distributed under the LGPL, please refer to COPYING "

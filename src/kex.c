@@ -44,11 +44,13 @@
 #ifdef HAVE_MLKEM
 #include "libssh/hybrid_mlkem.h"
 #endif
+#include "libssh/kex-gss.h"
 #include "libssh/knownhosts.h"
 #include "libssh/misc.h"
 #include "libssh/pki.h"
 #include "libssh/bignum.h"
 #include "libssh/token.h"
+#include "libssh/gssapi.h"
 
 #ifdef HAVE_BLOWFISH
 # define BLOWFISH ",blowfish-cbc"
@@ -794,6 +796,8 @@ int ssh_set_client_kex(ssh_session session)
     const char *wanted = NULL;
     int ok;
     int i;
+    bool gssapi_null_alg = false;
+    char *hostkeys = NULL;
 
     /* Skip if already set, for example for the rekey or when we do the guessing
      * it could have been already used to make some protocol decisions. */
@@ -806,6 +810,42 @@ int ssh_set_client_kex(ssh_session session)
         ssh_set_error(session, SSH_FATAL, "PRNG error");
         return SSH_ERROR;
     }
+#ifdef WITH_GSSAPI
+    if (session->opts.gssapi_key_exchange) {
+        char *gssapi_algs = NULL;
+
+        ok = ssh_gssapi_init(session);
+        if (ok != SSH_OK) {
+            ssh_set_error_oom(session);
+            return SSH_ERROR;
+        }
+
+        ok = ssh_gssapi_import_name(session->gssapi, session->opts.host);
+        if (ok != SSH_OK) {
+            return SSH_ERROR;
+        }
+
+        gssapi_algs = ssh_gssapi_kex_mechs(session);
+        if (gssapi_algs == NULL) {
+            return SSH_ERROR;
+        }
+
+        /* Prefix the default algorithms with gsskex algs */
+        if (ssh_fips_mode()) {
+            session->opts.wanted_methods[SSH_KEX] =
+                ssh_prefix_without_duplicates(fips_methods[SSH_KEX],
+                                              gssapi_algs);
+        } else {
+            session->opts.wanted_methods[SSH_KEX] =
+                ssh_prefix_without_duplicates(default_methods[SSH_KEX],
+                                              gssapi_algs);
+        }
+
+        gssapi_null_alg = true;
+
+        SAFE_FREE(gssapi_algs);
+    }
+#endif
 
     /* Set the list of allowed algorithms in order of preference, if it hadn't
      * been set yet. */
@@ -818,6 +858,16 @@ int ssh_set_client_kex(ssh_session session)
             if (client->methods[i] == NULL) {
                 ssh_set_error_oom(session);
                 return SSH_ERROR;
+            }
+            if (gssapi_null_alg) {
+                hostkeys =
+                    ssh_append_without_duplicates(client->methods[i], "null");
+                if (hostkeys == NULL) {
+                    ssh_set_error_oom(session);
+                    return SSH_ERROR;
+                }
+                SAFE_FREE(client->methods[i]);
+                client->methods[i] = hostkeys;
             }
             continue;
         }
@@ -910,6 +960,14 @@ kex_select_kex_type(const char *kex)
 {
     if (strcmp(kex, "diffie-hellman-group1-sha1") == 0) {
         return SSH_KEX_DH_GROUP1_SHA1;
+    } else if (strncmp(kex, "gss-group14-sha256-", 19) == 0) {
+        return SSH_GSS_KEX_DH_GROUP14_SHA256;
+    } else if (strncmp(kex, "gss-group16-sha512-", 19) == 0) {
+        return SSH_GSS_KEX_DH_GROUP16_SHA512;
+    } else if (strncmp(kex, "gss-nistp256-sha256-", 20) == 0) {
+        return SSH_GSS_KEX_ECDH_NISTP256_SHA256;
+    } else if (strncmp(kex, "gss-curve25519-sha256-", 22) == 0) {
+        return SSH_GSS_KEX_CURVE25519_SHA256;
     } else if (strcmp(kex, "diffie-hellman-group14-sha1") == 0) {
         return SSH_KEX_DH_GROUP14_SHA1;
     } else if (strcmp(kex, "diffie-hellman-group14-sha256") == 0) {
@@ -966,6 +1024,14 @@ static void revert_kex_callbacks(ssh_session session)
     case SSH_KEX_DH_GROUP16_SHA512:
     case SSH_KEX_DH_GROUP18_SHA512:
         ssh_client_dh_remove_callbacks(session);
+        break;
+    case SSH_GSS_KEX_DH_GROUP14_SHA256:
+    case SSH_GSS_KEX_DH_GROUP16_SHA512:
+    case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
+    case SSH_GSS_KEX_CURVE25519_SHA256:
+#ifdef WITH_GSSAPI
+        ssh_client_gss_kex_remove_callbacks(session);
+#endif /* WITH_GSSAPI */
         break;
 #ifdef WITH_GEX
     case SSH_KEX_DH_GEX_SHA1:
@@ -1436,6 +1502,18 @@ int ssh_make_sessionid(ssh_session session)
         goto error;
     }
 
+    if (server_pubkey_blob == NULL) {
+        if ((session->server && ssh_kex_is_gss(session->next_crypto)) ||
+            session->opts.gssapi_key_exchange) {
+            server_pubkey_blob = ssh_string_new(0);
+            if (server_pubkey_blob == NULL) {
+                ssh_set_error_oom(session);
+                rc = SSH_ERROR;
+                goto error;
+            }
+        }
+    }
+
     rc = ssh_buffer_pack(buf,
                          "dPdPS",
                          ssh_buffer_get_len(client_hash),
@@ -1457,7 +1535,9 @@ int ssh_make_sessionid(ssh_session session)
     case SSH_KEX_DH_GROUP1_SHA1:
     case SSH_KEX_DH_GROUP14_SHA1:
     case SSH_KEX_DH_GROUP14_SHA256:
+    case SSH_GSS_KEX_DH_GROUP14_SHA256:
     case SSH_KEX_DH_GROUP16_SHA512:
+    case SSH_GSS_KEX_DH_GROUP16_SHA512:
     case SSH_KEX_DH_GROUP18_SHA512:
         rc = ssh_dh_keypair_get_keys(session->next_crypto->dh_ctx,
                                      DH_CLIENT_KEYPAIR, NULL, &client_pubkey);
@@ -1523,6 +1603,7 @@ int ssh_make_sessionid(ssh_session session)
     case SSH_KEX_ECDH_SHA2_NISTP256:
     case SSH_KEX_ECDH_SHA2_NISTP384:
     case SSH_KEX_ECDH_SHA2_NISTP521:
+    case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
         if (session->next_crypto->ecdh_client_pubkey == NULL ||
             session->next_crypto->ecdh_server_pubkey == NULL) {
             SSH_LOG(SSH_LOG_TRACE, "ECDH parameter missing");
@@ -1541,6 +1622,7 @@ int ssh_make_sessionid(ssh_session session)
 #ifdef HAVE_CURVE25519
     case SSH_KEX_CURVE25519_SHA256:
     case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
+    case SSH_GSS_KEX_CURVE25519_SHA256:
         rc = ssh_buffer_pack(buf,
                              "dPdP",
                              CURVE25519_PUBKEY_SIZE,
@@ -1651,6 +1733,7 @@ int ssh_make_sessionid(ssh_session session)
                                    session->next_crypto->secret_hash);
         break;
     case SSH_KEX_DH_GROUP14_SHA256:
+    case SSH_GSS_KEX_DH_GROUP14_SHA256:
     case SSH_KEX_ECDH_SHA2_NISTP256:
     case SSH_KEX_CURVE25519_SHA256:
     case SSH_KEX_CURVE25519_SHA256_LIBSSH_ORG:
@@ -1658,6 +1741,8 @@ int ssh_make_sessionid(ssh_session session)
     case SSH_KEX_MLKEM768X25519_SHA256:
     case SSH_KEX_MLKEM768NISTP256_SHA256:
 #endif
+    case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
+    case SSH_GSS_KEX_CURVE25519_SHA256:
 #ifdef WITH_GEX
     case SSH_KEX_DH_GEX_SHA256:
 #endif /* WITH_GEX */
@@ -1686,6 +1771,7 @@ int ssh_make_sessionid(ssh_session session)
                                      session->next_crypto->secret_hash);
         break;
     case SSH_KEX_DH_GROUP16_SHA512:
+    case SSH_GSS_KEX_DH_GROUP16_SHA512:
     case SSH_KEX_DH_GROUP18_SHA512:
     case SSH_KEX_ECDH_SHA2_NISTP521:
     case SSH_KEX_SNTRUP761X25519_SHA512:
@@ -1960,4 +2046,23 @@ error:
     }
 
     return rc;
+}
+
+/** @internal
+ * @brief Check if a given crypto context has a GSSAPI KEX set
+ *
+ * @param[in] crypto The SSH crypto context
+ * @return true if the KEX of the context is a GSSAPI KEX, false otherwise
+ */
+bool ssh_kex_is_gss(struct ssh_crypto_struct *crypto)
+{
+    switch (crypto->kex_type) {
+    case SSH_GSS_KEX_DH_GROUP14_SHA256:
+    case SSH_GSS_KEX_DH_GROUP16_SHA512:
+    case SSH_GSS_KEX_ECDH_NISTP256_SHA256:
+    case SSH_GSS_KEX_CURVE25519_SHA256:
+        return true;
+    default:
+        return false;
+    }
 }
