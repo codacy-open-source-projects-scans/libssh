@@ -616,12 +616,14 @@ ssh_gssapi_creds ssh_gssapi_get_creds(ssh_session session)
  */
 void ssh_gssapi_set_creds(ssh_session session, const ssh_gssapi_creds creds)
 {
+    int rc;
+
     if (session == NULL) {
         return;
     }
     if (session->gssapi == NULL) {
-        ssh_gssapi_init(session);
-        if (session->gssapi == NULL) {
+        rc = ssh_gssapi_init(session);
+        if (rc == SSH_ERROR) {
             return;
         }
     }
@@ -798,7 +800,7 @@ int ssh_gssapi_check_client_config(ssh_session session)
         SSH_LOG(SSH_LOG_DEBUG, "Supported mech %zu: %s", i, ptr);
         free(ptr);
 
-        /* If atleast one mechanism is configured then return successfully */
+        /* If at least one mechanism is configured then return successfully */
         ret = SSH_OK;
 
     end:
@@ -1403,10 +1405,10 @@ SSH_PACKET_CALLBACK(ssh_packet_userauth_gssapi_token_client)
     input_token.value = ssh_string_data(token);
     maj_stat =
         ssh_gssapi_init_ctx(session->gssapi, &input_token, &output_token, NULL);
+    SSH_STRING_FREE(token);
     if (GSS_ERROR(maj_stat)) {
         goto error;
     }
-    SSH_STRING_FREE(token);
 
     if (output_token.length != 0) {
         hexa = ssh_get_hexa(output_token.value, output_token.length);
