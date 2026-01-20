@@ -229,10 +229,10 @@ else()
     set(DROPBEAR_EXECUTABLE "/bin/false")
 endif()
 
-find_program(PUTTY_EXECUTABLE 
-             NAMES 
-                plink 
-                plink.exe 
+find_program(PUTTY_EXECUTABLE
+             NAMES
+                plink
+                plink.exe
                 putty   # Fallback for systems where plink isn't separate
              DOC "Path to PuTTY plink executable for automated tests")
 
@@ -242,10 +242,10 @@ else()
     set(PUTTY_EXECUTABLE "/bin/putty-not-found")
 endif()
 
-find_program(PUTTYGEN_EXECUTABLE 
-             NAMES 
-                puttygen 
-                puttygen.exe 
+find_program(PUTTYGEN_EXECUTABLE
+             NAMES
+                puttygen
+                puttygen.exe
              DOC "Path to PuTTYgen executable for key conversion")
 
 if (PUTTYGEN_EXECUTABLE)
@@ -417,6 +417,9 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/charlie/.ssh/authorized_keys "${CONTENTS}")
 
     file(READ keys/pkcs11/id_pkcs11_ecdsa_521_openssh.pub CONTENTS)
+    file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/charlie/.ssh/authorized_keys "${CONTENTS}")
+
+    file(READ keys/pkcs11/id_pkcs11_ed25519_openssh.pub CONTENTS)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/charlie/.ssh/authorized_keys "${CONTENTS}")
 
     # Copy the signed key to an doe's homedir.

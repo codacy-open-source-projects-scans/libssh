@@ -54,6 +54,7 @@ static int setup_files(void **state)
     struct test_server_st *tss;
     struct torture_state *s;
     char sshd_path[1024];
+    char log_file[1024];
 
     int rc;
 
@@ -74,11 +75,16 @@ static int setup_files(void **state)
     rc = mkdir(sshd_path, 0755);
     assert_return_code(rc, errno);
 
+    snprintf(log_file, sizeof(log_file), "%s/sshd/log", s->socket_dir);
+
     snprintf(tss->rsa_hostkey,
              sizeof(tss->rsa_hostkey),
              "%s/sshd/ssh_host_rsa_key",
              s->socket_dir);
     torture_write_file(tss->rsa_hostkey, torture_get_testkey(SSH_KEYTYPE_RSA, 0));
+
+    /* not to mix up the client and server messages */
+    s->log_file = strdup(log_file);
 
     tss->state = s;
     *state = tss;
@@ -257,7 +263,7 @@ static void test_algorithm_no_hmac_overlap(void **state, const char *algorithm)
     s = tss->state;
     assert_non_null(s);
 
-    /* Prepare key files */
+    /* Prepare config file */
     snprintf(config_content,
              sizeof(config_content),
              "HostKey %s\nCiphers %s\nMACs %s\n",
@@ -268,9 +274,10 @@ static void test_algorithm_no_hmac_overlap(void **state, const char *algorithm)
     assert_non_null(s->srv_config);
     torture_write_file(s->srv_config, config_content);
 
-    fprintf(stderr, "Config file %s content: \n\n%s\n", s->srv_config,
+    SSH_LOG(SSH_LOG_TRACE,
+            "Config file %s content: \n\n%s\n",
+            s->srv_config,
             config_content);
-    fflush(stderr);
 
     /* Start server */
     rc = start_server(state);
@@ -348,11 +355,27 @@ static void test_kex_self_compat(void **state, const char *kex)
     struct test_server_st *tss = *state;
     struct torture_state *s = NULL;
     ssh_session session = NULL;
+    char config_content[4096];
     int rc;
 
     assert_non_null(tss);
     s = tss->state;
     assert_non_null(s);
+
+    /* Prepare config file */
+    snprintf(config_content,
+             sizeof(config_content),
+             "HostKey %s\nKexAlgorithms %s\n",
+             tss->rsa_hostkey,
+             kex);
+
+    assert_non_null(s->srv_config);
+    torture_write_file(s->srv_config, config_content);
+
+    SSH_LOG(SSH_LOG_TRACE,
+            "Config file %s content: \n\n%s\n",
+            s->srv_config,
+            config_content);
 
     rc = start_server(state);
     assert_int_equal(rc, 0);
