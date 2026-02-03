@@ -189,7 +189,6 @@ if (DOXYGEN_FOUND)
         sftp_message,
         sftp_packet,
         sftp_request_queue,
-        sftp_session,
         sftp_status_message,
         sftp_statvfs_t,
         poll_fn,

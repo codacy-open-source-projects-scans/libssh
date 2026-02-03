@@ -90,7 +90,7 @@ endif (WITH_FIDO2)
 
 # Disable symbol versioning in non UNIX platforms
 if (UNIX)
-    find_package(ABIMap 0.3.1)
+    find_package(ABIMap 0.4.0)
 else (UNIX)
     set(WITH_SYMBOL_VERSIONING OFF)
 endif (UNIX)
@@ -181,6 +181,10 @@ if (WITH_SYMBOL_VERSIONING AND ABIMAP_FOUND)
             set(ALLOW_ABI_BREAK "BREAK_ABI")
         endif()
 
+        if (WITH_FINAL)
+            set(FINAL "FINAL")
+        endif()
+
         # Target we can depend on in 'make dist'
         set(_SYMBOL_TARGET "${PROJECT_NAME}.map")
 
@@ -193,7 +197,7 @@ if (WITH_SYMBOL_VERSIONING AND ABIMAP_FOUND)
                           RELEASE_NAME_VERSION ${PROJECT_NAME}_${LIBRARY_VERSION}
                           CURRENT_MAP ${MAP_PATH}
                           COPY_TO ${MAP_PATH}
-                          FINAL
+                          ${FINAL}
                           ${ALLOW_ABI_BREAK})
 
         # Write the current version to the source

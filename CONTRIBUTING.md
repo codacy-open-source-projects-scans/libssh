@@ -137,6 +137,33 @@ The script exceeded the maximum execution time set for the job
 Note, that the built dependencies are cached so after successful build in your
 namespace, the rebuilds should be much faster.
 
+## Running GitLab CI locally (optional helper)
+
+For contributors working on CI, build system changes, or adding new CI jobs, it can be useful to run GitLab CI pipelines locally before pushing.
+
+libssh provides a small helper script based on `gitlab-ci-local` that can:
+
+- List all jobs defined in `.gitlab-ci.yml`
+- Run a specific job or the full pipeline locally
+- Automatically pick up new jobs when they are added to the CI configuration
+- Optionally clean up CI Docker images after execution
+
+### Requirements
+
+- Docker (daemon running)
+- git
+- gitlab-ci-local  
+  https://github.com/firecow/gitlab-ci-local
+
+### Usage
+
+```bash
+./.gitlab-ci/local-ci.sh --list
+./.gitlab-ci/local-ci.sh --run fedora/libressl/x86_64
+./.gitlab-ci/local-ci.sh --all
+./.gitlab-ci/local-ci.sh --run fedora/libressl/x86_64 --clean
+```
+
 # Coding conventions in the libssh tree
 
 ## Quick Start

@@ -301,6 +301,37 @@ fedora/openssl_3.x/x86_64/minimal:
       make test_memcheck
     - cat Testing/Temporary/MemoryChecker.*.log | wc -l | grep "^0$"
 
+fedora/libressl/x86_64:
+  extends: .fedora
+  stage: test
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  variables:
+    LIBRESSL_VERSION: "4.2.1"
+    CMAKE_ADDITIONAL_OPTIONS: >
+      -DCMAKE_C_FLAGS="-I/opt/libressl/include"
+      -DOPENSSL_ROOT_DIR=/opt/libressl
+      -DOPENSSL_INCLUDE_DIR=/opt/libressl/include
+      -DOPENSSL_CRYPTO_LIBRARY=/opt/libressl/lib/libcrypto.so
+      -DOPENSSL_SSL_LIBRARY=/opt/libressl/lib/libssl.so
+      -DWITH_GSSAPI=OFF
+      -DWITH_FIDO2=OFF
+  before_script:
+    - *build
+    - dnf install -y perl-core autoconf automake libtool pkgconf-pkg-config
+    - curl -LO https://ftp.openbsd.org/pub/OpenBSD/LibreSSL/libressl-${LIBRESSL_VERSION}.tar.gz
+    - tar xf libressl-${LIBRESSL_VERSION}.tar.gz
+    - cd libressl-${LIBRESSL_VERSION}
+    - ./configure --prefix=/opt/libressl
+    - make -j$(nproc)
+    - make install
+    - cd ..
+  script:
+    - export PKG_CONFIG_PATH=/opt/libressl/lib/pkgconfig
+    - export LD_LIBRARY_PATH=/opt/libressl/lib
+    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+      make -j$(nproc) &&
+      ctest --output-on-failure
+
 # The PKCS#11 support is turned off as it brings dozens of memory issues from
 # engine_pkcs11 or openssl itself
 fedora/valgrind/openssl:

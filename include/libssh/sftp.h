@@ -74,6 +74,21 @@ typedef struct sftp_file_struct* sftp_file;
 typedef struct sftp_message_struct* sftp_message;
 typedef struct sftp_packet_struct* sftp_packet;
 typedef struct sftp_request_queue_struct* sftp_request_queue;
+
+/**
+ * @brief SFTP session handle.
+ *
+ * This type represents an active SFTP session associated with an SSH channel.
+ * It is created and destroyed via the libssh SFTP API and is internally
+ * managed by libssh. It is used by applications to perform SFTP operations
+ * such as file access and directory management.
+ *
+ * The internal structure of this type is opaque and must not be accessed
+ * directly by applications.
+ *
+ * @see sftp_new
+ * @see sftp_free
+ */
 typedef struct sftp_session_struct* sftp_session;
 typedef struct sftp_status_message_struct* sftp_status_message;
 typedef struct sftp_statvfs_struct* sftp_statvfs_t;

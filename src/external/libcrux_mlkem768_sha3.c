@@ -28,8 +28,9 @@
 
 #include "config.h"
 
+#include <stdio.h>
+
 #include "libssh/mlkem_native.h"
-#include "libssh/priv.h"
 
 #if !defined(__GNUC__) || (__GNUC__ < 2)
 # define __attribute__(x)
@@ -38,7 +39,7 @@
 #define KRML_NOINLINE __attribute__((noinline, unused))
 #define KRML_HOST_EPRINTF(...)
 #define KRML_HOST_EXIT(x) do { \
-    SSH_LOG(SSH_LOG_WARNING, "internal error"); \
+    fprintf(stderr, "mlkem internal error"); \
     exit(x); \
 } while (0)
 
