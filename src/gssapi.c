@@ -850,6 +850,10 @@ int ssh_gssapi_client_identity(ssh_session session, gss_OID_set *valid_oids)
     char *ptr = NULL;
     int ret;
 
+    if (session == NULL || session->gssapi == NULL) {
+        return SSH_ERROR;
+    }
+
     if (session->gssapi->client.client_deleg_creds == NULL) {
         if (session->opts.gss_client_identity != NULL) {
             namebuf.value = (void *)session->opts.gss_client_identity;
