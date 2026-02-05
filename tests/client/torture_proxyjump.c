@@ -121,6 +121,50 @@ static int authenticate(ssh_session jump_session, void *user)
     return ssh_userauth_publickey_auto(jump_session, NULL, NULL);
 }
 
+static int authenticate_doe(ssh_session jump_session, void *user)
+{
+    ssh_key pkey = NULL;
+    char bob_ssh_key[1024];
+    struct passwd *pwd = NULL;
+    int rc;
+
+    (void)user;
+
+    pwd = getpwnam("bob");
+    assert_non_null(pwd);
+
+    snprintf(bob_ssh_key, sizeof(bob_ssh_key), "%s/.ssh/id_rsa", pwd->pw_dir);
+
+    rc = ssh_pki_import_privkey_file(bob_ssh_key, NULL, NULL, NULL, &pkey);
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_userauth_publickey(jump_session, NULL, pkey);
+    ssh_key_free(pkey);
+    return rc;
+}
+
+static int authenticate_frank(ssh_session jump_session, void *user)
+{
+    ssh_key pkey = NULL;
+    char bob_ssh_key[1024];
+    struct passwd *pwd = NULL;
+    int rc;
+
+    (void)user;
+
+    pwd = getpwnam("bob");
+    assert_non_null(pwd);
+
+    snprintf(bob_ssh_key, sizeof(bob_ssh_key), "%s/.ssh/id_ecdsa", pwd->pw_dir);
+
+    rc = ssh_pki_import_privkey_file(bob_ssh_key, NULL, NULL, NULL, &pkey);
+    assert_int_equal(rc, SSH_OK);
+
+    rc = ssh_userauth_publickey(jump_session, NULL, pkey);
+    ssh_key_free(pkey);
+    return rc;
+}
+
 static void torture_proxyjump_multiple_jump(void **state)
 {
     struct torture_state *s = *state;
@@ -129,11 +173,10 @@ static void torture_proxyjump_multiple_jump(void **state)
     const char *address = torture_server_address(AF_INET);
     int rc;
     socket_t fd;
-
     struct ssh_jump_callbacks_struct c = {
         .before_connection = before_connection,
         .verify_knownhost = verify_knownhost,
-        .authenticate = authenticate
+        .authenticate = authenticate,
     };
 
     rc = snprintf(proxyjump_buf,
@@ -177,14 +220,14 @@ static void torture_proxyjump_multiple_sshd_jump(void **state)
     struct ssh_jump_callbacks_struct c = {
         .before_connection = before_connection,
         .verify_knownhost = verify_knownhost,
-        .authenticate = authenticate,
+        .authenticate = authenticate_doe,
     };
 
     torture_setup_sshd_servers(state, false);
 
     rc = snprintf(proxyjump_buf,
                   sizeof(proxyjump_buf),
-                  "alice@%s:22,alice@%s:22",
+                  "doe@%s:22,doe@%s:22",
                   address,
                   address1);
     if (rc < 0 || rc >= (int)sizeof(proxyjump_buf)) {
@@ -222,17 +265,22 @@ static void torture_proxyjump_multiple_sshd_users_jump(void **state)
     int rc;
     socket_t fd;
 
-    struct ssh_jump_callbacks_struct c = {
+    struct ssh_jump_callbacks_struct c1 = {
         .before_connection = before_connection,
         .verify_knownhost = verify_knownhost,
-        .authenticate = authenticate,
+        .authenticate = authenticate_doe,
+    };
+    struct ssh_jump_callbacks_struct c2 = {
+        .before_connection = before_connection,
+        .verify_knownhost = verify_knownhost,
+        .authenticate = authenticate_frank,
     };
 
     torture_setup_sshd_servers(state, false);
 
     rc = snprintf(proxyjump_buf,
                   sizeof(proxyjump_buf),
-                  "doe@%s:22,alice@%s:22",
+                  "doe@%s:22,frank@%s:22",
                   address,
                   address1);
     if (rc < 0 || rc >= (int)sizeof(proxyjump_buf)) {
@@ -240,9 +288,9 @@ static void torture_proxyjump_multiple_sshd_users_jump(void **state)
     }
     rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP, proxyjump_buf);
     assert_ssh_return_code(session, rc);
-    rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &c);
+    rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &c1);
     assert_ssh_return_code(session, rc);
-    rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &c);
+    rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND, &c2);
     assert_ssh_return_code(session, rc);
 
     rc = ssh_connect(session);

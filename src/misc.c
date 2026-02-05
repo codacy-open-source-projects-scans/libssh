@@ -814,7 +814,17 @@ static struct ssh_iterator *ssh_iterator_new(const void *data)
     return iterator;
 }
 
-int ssh_list_append(struct ssh_list *list,const void *data)
+/**
+ * @internal
+ *
+ * @brief Appends an element to the end of the list.
+ *
+ * @param[in] list  The list to append the element
+ * @param[in] data  The element to append
+ *
+ * @return          `SSH_OK` on success, `SSH_ERROR` on error
+ */
+int ssh_list_append(struct ssh_list *list, const void *data)
 {
   struct ssh_iterator *iterator = NULL;
 

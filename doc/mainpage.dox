@@ -171,21 +171,15 @@ The following RFC documents described SSH-2 protocol as an Internet standard.
     The Secure Shell (SSH) Session Channel Break Extension
  - <a href="https://tools.ietf.org/html/rfc4344" target="_blank">RFC 4344</a>,
     The Secure Shell (SSH) Transport Layer Encryption Modes
- - <a href="https://tools.ietf.org/html/rfc4345" target="_blank">RFC 4345</a>,
-    Improved Arcfour Modes for the Secure Shell (SSH) Transport Layer Protocol
 
 It was later modified and expanded by the following RFCs.
 
  - <a href="https://tools.ietf.org/html/rfc4419" target="_blank">RFC 4419</a>,
     Diffie-Hellman Group Exchange for the Secure Shell (SSH) Transport Layer
     Protocol
- - <a href="https://tools.ietf.org/html/rfc4432" target="_blank">RFC 4432</a>,
-    RSA Key Exchange for the Secure Shell (SSH) Transport Layer Protocol
-    (not implemented in libssh)
  - <a href="https://tools.ietf.org/html/rfc4462" target="_blank">RFC 4462</a>,
     Generic Security Service Application Program Interface (GSS-API)
     Authentication and Key Exchange for the Secure Shell (SSH) Protocol
-    (only the authentication implemented in libssh)
  - <a href="https://tools.ietf.org/html/rfc4716" target="_blank">RFC 4716</a>,
     The Secure Shell (SSH) Public Key File Format
     (not implemented in libssh)
@@ -204,7 +198,6 @@ It was later modified and expanded by the following RFCs.
     (not implemented in libssh)
  - <a href="https://tools.ietf.org/html/rfc8160" target="_blank">RFC 8160</a>,
     IUTF8 Terminal Mode in Secure Shell (SSH)
-    (not handled in libssh)
  - <a href="https://tools.ietf.org/html/rfc8270" target="_blank">RFC 8270</a>,
     Increase the Secure Shell Minimum Recommended Diffie-Hellman Modulus Size to 2048 Bits
  - <a href="https://tools.ietf.org/html/rfc8308" target="_blank">RFC 8308</a>,
@@ -223,6 +216,14 @@ There are also drafts that are being currently developed and followed.
 
  - <a href="https://tools.ietf.org/html/draft-miller-ssh-agent-03" target="_blank">draft-miller-ssh-agent-08</a>
     SSH Agent Protocol
+ - <a href="https://tools.ietf.org/html/draft-ietf-sshm-mlkem-hybrid-kex-09" target="_blank">draft-ietf-sshm-mlkem-hybrid-kex-09</a>
+    PQ/T Hybrid Key Exchange with ML-KEM in SSH
+ - <a href="https://tools.ietf.org/html/draft-ietf-sshm-ntruprime-ssh-06" target="_blank">draft-ietf-sshm-ntruprime-ssh-06</a>
+    Secure Shell (SSH) Key Exchange Method Using Hybrid Streamlined NTRU Prime sntrup761 and X25519 with SHA-512: sntrup761x25519-sha512
+ - <a href="https://tools.ietf.org/html/draft-ietf-sshm-chacha20-poly1305-02" target="_blank">draft-ietf-sshm-chacha20-poly1305-02</a>
+    Secure Shell (SSH) authenticated encryption cipher: chacha20-poly1305
+ - <a href="https://tools.ietf.org/html/draft-ietf-sshm-strict-kex-01" target="_blank">draft-ietf-sshm-strict-kex-01</a>
+    SSH Strict KEX extension
 
 Interesting cryptography documents:
 
@@ -247,8 +248,6 @@ them like the statvfs calls in SFTP or the ssh-agent.
     OpenSSH's deviations and extensions</a>
  - <a href="https://api.libssh.org/rfc/PROTOCOL.certkeys" target="_blank">
     OpenSSH's pubkey certificate authentication</a>
- - <a href="https://api.libssh.org/rfc/PROTOCOL.chacha20poly1305" target="_blank">
-    chacha20-poly1305@openssh.com authenticated encryption mode</a>
  - <a href="https://api.libssh.org/rfc/PROTOCOL.key" target="_blank">
     OpenSSH private key format (openssh-key-v1)</a>
 

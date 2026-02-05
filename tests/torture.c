@@ -833,7 +833,7 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
         "TrustedUserCAKeys %s\n"
         "\n"
         "LogLevel DEBUG3\n"
-        "Subsystem sftp %s -l DEBUG2\n"
+        "Subsystem sftp %s -l DEBUG3 -e\n"
         "\n"
         "PasswordAuthentication yes\n"
         "PubkeyAuthentication yes\n"
@@ -873,7 +873,7 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
         "TrustedUserCAKeys %s\n" /* Trusted CA */
         "\n"
         "LogLevel DEBUG3\n"
-        "Subsystem sftp %s -l DEBUG2\n" /* SFTP server */
+        "Subsystem sftp %s -l DEBUG3 -e\n" /* SFTP server */
         "\n"
         "PasswordAuthentication yes\n"
         "PubkeyAuthentication yes\n"

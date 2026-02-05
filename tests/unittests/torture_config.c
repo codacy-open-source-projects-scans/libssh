@@ -159,6 +159,8 @@ extern LIBSSH_THREAD int ssh_log_level;
     "\tProxyJump jumpbox:2222\n" \
     "Host two-step\n" \
     "\tProxyJump u1@first:222,u2@second:33\n" \
+    "Host three-step\n" \
+    "\tProxyJump u1@first:222,u2@second:33,u3@third:444\n" \
     "Host none\n" \
     "\tProxyJump none\n" \
     "Host only-command\n" \
@@ -1172,6 +1174,23 @@ static void torture_config_proxyjump(void **state,
                             "u1",
                             "222");
 
+    /* Three step jump */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "three-step");
+    _parse_config(session, file, string, SSH_OK);
+    helper_proxy_jump_check(session->opts.proxy_jumps->root,
+                            "third",
+                            "u3",
+                            "444");
+    helper_proxy_jump_check(session->opts.proxy_jumps->root->next,
+                            "second",
+                            "u2",
+                            "33");
+    helper_proxy_jump_check(session->opts.proxy_jumps->root->next->next,
+                            "first",
+                            "u1",
+                            "222");
+
     /* none */
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "none");
@@ -1236,6 +1255,13 @@ static void torture_config_proxyjump(void **state,
     _parse_config(session, file, string, SSH_OK);
     assert_string_equal(session->opts.ProxyCommand,
                         "ssh -l u1 -p 222 -J u2@second:33 -W '[%h]:%p' first");
+
+    /* Three step jump */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "three-step");
+    _parse_config(session, file, string, SSH_OK);
+    assert_string_equal(session->opts.ProxyCommand,
+                        "ssh -l u1 -p 222 -J u2@second:33,u3@third:444 -W '[%h]:%p' first");
 
     /* none */
     torture_reset_config(session);

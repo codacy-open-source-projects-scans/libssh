@@ -549,17 +549,14 @@ static sftp_attributes sftp_parse_attr_3(sftp_session sftp,
     if (rc != SSH_OK){
         goto error;
     }
-    SSH_LOG(SSH_LOG_DEBUG,
-            "Flags: %.8" PRIx32 "\n", attr->flags);
+    SSH_LOG(SSH_LOG_DEBUG, "Flags: %.8" PRIx32, attr->flags);
 
     if (attr->flags & SSH_FILEXFER_ATTR_SIZE) {
         rc = ssh_buffer_unpack(buf, "q", &attr->size);
         if(rc != SSH_OK) {
             goto error;
         }
-        SSH_LOG(SSH_LOG_DEBUG,
-                "Size: %" PRIu64 "\n",
-                (uint64_t) attr->size);
+        SSH_LOG(SSH_LOG_DEBUG, "Size: %" PRIu64, (uint64_t)attr->size);
     }
 
     if (attr->flags & SSH_FILEXFER_ATTR_UIDGID) {

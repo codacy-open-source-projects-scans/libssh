@@ -542,16 +542,8 @@ static int ssh_connector_channel_data_cb(ssh_session session,
             window_len = MIN(window, len);
 
             /* Route the data to the right exception channel */
-            if (is_stderr && (connector->out_flags & SSH_CONNECTOR_STDERR)) {
-                w = ssh_channel_write_stderr(connector->out_channel,
-                                             data,
-                                             window_len);
-            } else if (!is_stderr &&
-                       (connector->out_flags & SSH_CONNECTOR_STDOUT)) {
-                w = ssh_channel_write(connector->out_channel,
-                                      data,
-                                      window_len);
-            } else if (connector->out_flags & SSH_CONNECTOR_STDOUT) {
+            if (connector->out_flags & SSH_CONNECTOR_STDOUT &&
+                !(is_stderr && (connector->out_flags & SSH_CONNECTOR_STDERR))) {
                 w = ssh_channel_write(connector->out_channel,
                                       data,
                                       window_len);

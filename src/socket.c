@@ -97,6 +97,10 @@ struct ssh_socket_struct {
 struct jump_thread_data_struct {
     ssh_session session;
     socket_t fd;
+    char *next_hostname;
+    uint16_t next_port;
+    struct ssh_jump_info_struct *next_jump;
+    struct ssh_jump_callbacks_struct *next_cb;
 };
 
 int proxy_disconnect = 0;
@@ -1249,6 +1253,22 @@ verify_knownhost(ssh_session session)
     return SSH_OK;
 }
 
+static void free_jump_thread_data(struct jump_thread_data_struct *data)
+{
+    if (data == NULL) {
+        return;
+    }
+
+    ssh_free(data->session);
+    SAFE_FREE(data->next_hostname);
+    if (data->next_jump != NULL) {
+        SAFE_FREE(data->next_jump->hostname);
+        SAFE_FREE(data->next_jump->username);
+    }
+    SAFE_FREE(data->next_jump);
+    SAFE_FREE(data);
+}
+
 static void *
 jump_thread_func(void *arg)
 {
@@ -1260,78 +1280,43 @@ jump_thread_func(void *arg)
     int rc;
     ssh_event event = NULL;
     ssh_connector connector_in = NULL, connector_out = NULL;
-    ssh_session session = NULL;
-    int next_port;
+    uint16_t next_port;
     char *next_hostname = NULL;
 
     jump_thread_data = (struct jump_thread_data_struct *)arg;
-    session = jump_thread_data->session;
+    jump_session = jump_thread_data->session;
 
-    next_port = session->opts.port;
-    next_hostname = strdup(session->opts.host);
+    /* First thing we need to do is to set the right level as its kept in
+     * thread local variable, therefore reset to 0 after spawning new thread.
+     */
+    ssh_set_log_level(jump_session->common.log_verbosity);
 
-    jump_session = ssh_new();
-    if (jump_session == NULL) {
-        goto exit;
-    }
+    cb = jump_thread_data->next_cb;
+    jis = jump_thread_data->next_jump;
 
-    jump_session->proxy_root = false;
-    /* Reset the global variable if it was previously 1 */
-    if (session->proxy_root) {
-        proxy_disconnect = 0;
-    }
-
-    for (jis = ssh_list_pop_head(struct ssh_jump_info_struct *,
-                                 session->opts.proxy_jumps);
-         jis != NULL;
-         jis = ssh_list_pop_head(struct ssh_jump_info_struct *,
-                                 session->opts.proxy_jumps)) {
-        rc = ssh_list_append(jump_session->opts.proxy_jumps, jis);
-        if (rc != SSH_OK) {
-            ssh_set_error_oom(session);
-            goto exit;
-        }
-    }
-    for (jis =
-            ssh_list_pop_head(struct ssh_jump_info_struct *,
-                              session->opts.proxy_jumps_user_cb);
-         jis != NULL;
-         jis = ssh_list_pop_head(struct ssh_jump_info_struct *,
-                                 session->opts.proxy_jumps_user_cb)) {
-        rc = ssh_list_append(jump_session->opts.proxy_jumps_user_cb, jis);
-        if (rc != SSH_OK) {
-            ssh_set_error_oom(session);
-            goto exit;
-        }
-    }
-
-    ssh_options_set(jump_session,
-                    SSH_OPTIONS_LOG_VERBOSITY,
-                    &session->common.log_verbosity);
-
-    /* Pop the information about the current jump */
-    jis = ssh_list_pop_head(struct ssh_jump_info_struct *,
-                            jump_session->opts.proxy_jumps);
-    if (jis == NULL) {
-        SSH_LOG(SSH_LOG_WARN, "Inconsistent list of proxy jumps received");
-        goto exit;
-    }
+    /* This is the calling thread target where we will eventually initialize
+     * forwarding */
+    next_port = jump_thread_data->next_port;
+    next_hostname = jump_thread_data->next_hostname;
 
     ssh_options_set(jump_session, SSH_OPTIONS_HOST, jis->hostname);
     ssh_options_set(jump_session, SSH_OPTIONS_USER, jis->username);
     ssh_options_set(jump_session, SSH_OPTIONS_PORT, &jis->port);
 
-    /* Pop the callbacks for the current jump */
-    cb = ssh_list_pop_head(struct ssh_jump_callbacks_struct *,
-                           jump_session->opts.proxy_jumps_user_cb);
-
-    if (cb != NULL) {
+    if (cb != NULL && cb->before_connection != NULL) {
         rc = cb->before_connection(jump_session, cb->userdata);
         if (rc != SSH_OK) {
             SSH_LOG(SSH_LOG_WARN, "%s", ssh_get_error(jump_session));
             goto exit;
         }
     }
+
+    SSH_LOG(SSH_LOG_PACKET,
+            "Proxy connecting to host %s port %d user %s, callbacks=%p",
+            jis->hostname,
+            jis->port,
+            jis->username,
+            (void *)cb);
 
     /* If there are more jumps then this will make a new thread and call the
      * current function again, until there are no jumps. When there are no jumps
@@ -1423,36 +1408,42 @@ exit:
         ssh_event_remove_connector(event, connector_out);
         ssh_connector_free(connector_out);
     }
-    SAFE_FREE(next_hostname);
-    if (jis != NULL) {
-        SAFE_FREE(jis->hostname);
-        SAFE_FREE(jis->username);
-    }
-    SAFE_FREE(jis);
 
     ssh_disconnect(jump_session);
     ssh_event_free(event);
-    ssh_free(jump_session);
 
     shutdown(jump_thread_data->fd, SHUT_RDWR);
     close(jump_thread_data->fd);
-    SAFE_FREE(jump_thread_data);
 
+    free_jump_thread_data(jump_thread_data);
     pthread_exit(NULL);
 }
 
 int
 ssh_socket_connect_proxyjump(ssh_socket s)
 {
+    char err_msg[SSH_ERRNO_MSG_MAX] = {0};
     ssh_poll_handle h = NULL;
     int rc;
     pthread_t jump_thread;
+    struct ssh_jump_info_struct *jis = NULL;
+    struct ssh_jump_callbacks_struct *cb = NULL;
     struct jump_thread_data_struct *jump_thread_data = NULL;
-    socket_t pair[2];
+    ssh_session jump_session = NULL, session = NULL;
+    struct ssh_list *empty_list = NULL;
+    socket_t pair[2] = {SSH_INVALID_SOCKET, SSH_INVALID_SOCKET};
+
+    session = s->session;
+
+    SSH_LOG(SSH_LOG_INFO,
+            "Connecting to host %s port %d user %s through ProxyJump",
+            session->opts.host,
+            session->opts.port,
+            session->opts.username);
 
     if (s->state != SSH_SOCKET_NONE) {
         ssh_set_error(
-            s->session,
+            session,
             SSH_FATAL,
             "ssh_socket_connect_proxyjump called on socket not unconnected");
         return SSH_ERROR;
@@ -1460,50 +1451,100 @@ ssh_socket_connect_proxyjump(ssh_socket s)
 
     jump_thread_data = calloc(1, sizeof(struct jump_thread_data_struct));
     if (jump_thread_data == NULL) {
-        ssh_set_error_oom(s->session);
+        ssh_set_error_oom(session);
         return SSH_ERROR;
     }
 
     rc = socketpair(PF_UNIX, SOCK_STREAM, 0, pair);
     if (rc == -1) {
-        char err_msg[SSH_ERRNO_MSG_MAX] = {0};
-
-        ssh_set_error(s->session,
+        ssh_set_error(session,
                       SSH_FATAL,
                       "Creating socket pair failed: %s",
                       ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
-        SAFE_FREE(jump_thread_data);
-        return SSH_ERROR;
+        goto fail;
     }
 
-    jump_thread_data->session = s->session;
+    jump_session = ssh_new();
+    if (jump_session == NULL) {
+        ssh_set_error_oom(session);
+        goto fail;
+    }
+
+    jump_session->proxy_root = false;
+    /* Reset the global variable if it was previously 1 */
+    if (session->proxy_root) {
+        proxy_disconnect = 0;
+    }
+
+    /* Pop first jump that will be used by the following thread */
+    jis = ssh_list_pop_head(struct ssh_jump_info_struct *,
+                            session->opts.proxy_jumps);
+    if (jis == NULL) {
+        SSH_LOG(SSH_LOG_WARN, "Inconsistent list of proxy jumps received");
+        ssh_free(jump_session);
+        goto fail;
+    }
+    jump_thread_data->next_jump = jis;
+    /* Move remaining to the jump session without reallocation.
+     * The list in the new jump_session is just allocated so empty */
+    empty_list = jump_session->opts.proxy_jumps;
+    jump_session->opts.proxy_jumps = session->opts.proxy_jumps;
+    session->opts.proxy_jumps = empty_list;
+
+    /* Pop the callbacks for the first jump */
+    cb = ssh_list_pop_head(struct ssh_jump_callbacks_struct *,
+                           session->opts.proxy_jumps_user_cb);
+    /* empty is ok */
+    jump_thread_data->next_cb = cb;
+    /* Move remaining to the jump session without reallocation.
+     * The list in the new jump_session is just allocated so empty */
+    empty_list = jump_session->opts.proxy_jumps_user_cb;
+    jump_session->opts.proxy_jumps_user_cb = session->opts.proxy_jumps_user_cb;
+    session->opts.proxy_jumps_user_cb = empty_list;
+
+    ssh_options_set(jump_session,
+                    SSH_OPTIONS_LOG_VERBOSITY,
+                    &session->common.log_verbosity);
+
+    jump_thread_data->next_port = session->opts.port;
+    jump_thread_data->next_hostname = strdup(session->opts.host);
+
     jump_thread_data->fd = pair[0];
+    pair[0] = SSH_INVALID_SOCKET;
+    jump_thread_data->session = jump_session;
+    /* transferred to the jump_thread_data */
+    jump_session = NULL;
+
+    SSH_LOG(SSH_LOG_INFO,
+            "Starting proxy thread to host %s port %d user %s, callbacks=%p",
+            jump_thread_data->next_jump->hostname,
+            jump_thread_data->next_jump->port,
+            jump_thread_data->next_jump->username,
+            (void *)jump_thread_data->next_cb);
 
     rc = pthread_create(&jump_thread, NULL, jump_thread_func, jump_thread_data);
     if (rc != 0) {
-        char err_msg[SSH_ERRNO_MSG_MAX] = {0};
-
-        ssh_set_error(s->session,
+        ssh_set_error(session,
                       SSH_FATAL,
                       "Creating new thread failed: %s",
                       ssh_strerror(rc, err_msg, SSH_ERRNO_MSG_MAX));
-        SAFE_FREE(jump_thread_data);
-        return SSH_ERROR;
+        goto fail;
     }
+    /* ownership passed to the thread */
+    jump_thread_data = NULL;
+
     rc = pthread_detach(jump_thread);
     if (rc != 0) {
-        char err_msg[SSH_ERRNO_MSG_MAX] = {0};
-
-        ssh_set_error(s->session,
+        ssh_set_error(session,
                       SSH_FATAL,
                       "Failed to detach thread: %s",
                       ssh_strerror(rc, err_msg, SSH_ERRNO_MSG_MAX));
-        SAFE_FREE(jump_thread_data);
-        return SSH_ERROR;
+        goto fail;
     }
 
     SSH_LOG(SSH_LOG_DEBUG,
-            "ProxyJump connection pipe: [%d,%d]",
+            "ProxyJump connection thread %lu started pipe: [%d,%d]",
+            (unsigned long)jump_thread,
             pair[0],
             pair[1]);
 
@@ -1511,6 +1552,7 @@ ssh_socket_connect_proxyjump(ssh_socket s)
     if (rc != SSH_OK) {
         return rc;
     }
+    pair[1] = SSH_INVALID_SOCKET;
 
     s->fd_is_socket = 1;
     h = ssh_socket_get_poll_handle(s);
@@ -1525,6 +1567,16 @@ ssh_socket_connect_proxyjump(ssh_socket s)
     }
 
     return SSH_OK;
+
+fail:
+    if (pair[0] != SSH_INVALID_SOCKET) {
+        close(pair[0]);
+    }
+    if (pair[1] != SSH_INVALID_SOCKET) {
+        close(pair[1]);
+    }
+    free_jump_thread_data(jump_thread_data);
+    return SSH_ERROR;
 }
 
 #endif /* HAVE_PTHREAD */

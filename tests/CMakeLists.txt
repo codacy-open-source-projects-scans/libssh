@@ -394,6 +394,7 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     # Allow to auth with bob's public keys on alice and doe account
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys @ONLY)
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/doe/.ssh/authorized_keys @ONLY)
+    configure_file(keys/id_ecdsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/frank/.ssh/authorized_keys @ONLY)
 
     # append ECDSA public key
     file(READ keys/id_ecdsa.pub CONTENTS)
