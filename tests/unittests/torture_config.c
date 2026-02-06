@@ -25,7 +25,7 @@ extern LIBSSH_THREAD int ssh_log_level;
 #define HOSTKEYALGORITHMS "ssh-ed25519,ecdsa-sha2-nistp521,ssh-rsa"
 #define PUBKEYACCEPTEDTYPES "rsa-sha2-512,ssh-rsa,ecdsa-sha2-nistp521"
 #define MACS "hmac-sha1,hmac-sha2-256,hmac-sha2-512,hmac-sha1-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com"
-#define USER_KNOWN_HOSTS "%d/my_known_hosts"
+#define USER_KNOWN_HOSTS "%d/.ssh/my_known_hosts"
 #define GLOBAL_KNOWN_HOSTS "/etc/ssh/my_ssh_known_hosts"
 #define BIND_ADDRESS "::1"
 

@@ -198,7 +198,7 @@ int
 ssh_gssapi_handle_userauth(ssh_session session, const char *user,
                            uint32_t n_oid, ssh_string *oids)
 {
-    char hostname[NI_MAXHOST] = {0};
+    char *hostname = NULL;
     OM_uint32 maj_stat, min_stat;
     size_t i;
     gss_OID_set supported; /* oids supported by server */
@@ -209,14 +209,6 @@ ssh_gssapi_handle_userauth(ssh_session session, const char *user,
     struct gss_OID_desc_struct oid;
     int rc;
     char err_msg[SSH_ERRNO_MSG_MAX] = {0};
-
-    rc = gethostname(hostname, 64);
-    if (rc != 0) {
-        SSH_LOG(SSH_LOG_TRACE,
-                "Error getting hostname: %s",
-                ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
-        return SSH_ERROR;
-    }
 
     /* Destroy earlier GSSAPI context if any */
     ssh_gssapi_free(session);
@@ -284,7 +276,16 @@ ssh_gssapi_handle_userauth(ssh_session session, const char *user,
         return SSH_OK;
     }
 
+    hostname = ssh_get_local_hostname();
+    if (hostname == NULL) {
+        SSH_LOG(SSH_LOG_TRACE,
+                "Error getting hostname: %s",
+                ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
+        return SSH_ERROR;
+    }
+
     rc = ssh_gssapi_import_name(session->gssapi, hostname);
+    SAFE_FREE(hostname);
     if (rc != SSH_OK) {
         ssh_auth_reply_default(session, 0);
         gss_release_oid_set(&min_stat, &both_supported);

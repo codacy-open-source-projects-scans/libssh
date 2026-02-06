@@ -308,6 +308,87 @@ static void ssh_connector_reset_pollevents(ssh_connector connector)
 /**
  * @internal
  *
+ * @brief Update the connector's flags after a read-write io
+ *        operation
+ *
+ * This should be called after some data is successfully read from
+ * connector's input and written to connector's output.
+ *
+ * @param[in, out] connector Connector for which the io operation occured.
+ *
+ * @warning This does not consider the case when the io indicated failure
+ *
+ * @warning This does not consider the case when the input indicated that
+ *          EOF was encountered.
+ */
+static void ssh_connector_update_flags_after_io(ssh_connector connector)
+{
+    /*
+     * With fds we can afford to mark:
+     * - in_available as 0 after an fd read (even if more pending data can be
+     *   immediately read from the fd)
+     *
+     * - out_wontblock as 0 after an fd write (even if more data can
+     *   be written to the fd without blocking)
+     *
+     * since poll events set on the fd will get raised to indicate
+     * possibility of read/write in case existing situation is apt
+     * (i.e can read/write occur right now) or if situation becomes
+     * apt in future (read data becomes available, write becomes
+     * possible)
+     */
+
+    /*
+     * On the other hand, with channels we need to be more careful
+     * before claiming read/write not possible because channel callbacks
+     * are called in limited scenarios.
+     *
+     * (e.g. connector callback to indicate read data available on input
+     * channel is called only when new data is received on channel. It is
+     * not called when we have some pending data in channel's buffers but
+     * don't receive any new data on the channel)
+     *
+     * Hence, in case of channels, blindly setting flag associated with
+     * read/write input/output to 0 after a read/write may not be a good
+     * idea as the callback that sets it back to 1 again may not be ever
+     * called again.
+     */
+
+    uint32_t window_size;
+
+    /* update in_available based on input source (fd or channel) */
+    if (connector->in_fd != SSH_INVALID_SOCKET) {
+        connector->in_available = 0;
+    } else if (connector->in_channel != NULL) {
+        if (ssh_channel_poll_timeout(connector->in_channel, 0, 0) > 0) {
+            connector->in_available = 1;
+        } else {
+            connector->in_available = 0;
+        }
+    } else {
+        /* connector input is invalid ! */
+        return;
+    }
+
+    /* update out_wontblock based on output source (fd or channel) */
+    if (connector->out_fd != SSH_INVALID_SOCKET) {
+        connector->out_wontblock = 0;
+    } else if (connector->out_channel != NULL) {
+        window_size = ssh_channel_window_size(connector->out_channel);
+        if (window_size > 0) {
+            connector->out_wontblock = 1;
+        } else {
+            connector->out_wontblock = 0;
+        }
+    } else {
+        /* connector output is invalid ! */
+        return;
+    }
+}
+
+/**
+ * @internal
+ *
  * @brief Callback called when a poll event is received on an input fd.
  */
 static void ssh_connector_fd_in_cb(ssh_connector connector)
@@ -390,8 +471,8 @@ static void ssh_connector_fd_in_cb(ssh_connector connector)
             ssh_set_error(connector->session, SSH_FATAL, "output socket or channel closed");
             return;
         }
-        connector->out_wontblock = 0;
-        connector->in_available = 0;
+
+        ssh_connector_update_flags_after_io(connector);
     } else {
         connector->in_available = 1;
     }
@@ -444,8 +525,8 @@ ssh_connector_fd_out_cb(ssh_connector connector)
                           "Output socket or channel closed");
             return;
         }
-        connector->in_available = 0;
-        connector->out_wontblock = 0;
+
+        ssh_connector_update_flags_after_io(connector);
     } else {
         connector->out_wontblock = 1;
     }
@@ -566,11 +647,7 @@ static int ssh_connector_channel_data_cb(ssh_session session,
             return SSH_ERROR;
         }
 
-        connector->out_wontblock = 0;
-        connector->in_available = 0;
-        if ((unsigned int)w < len) {
-            connector->in_available = 1;
-        }
+        ssh_connector_update_flags_after_io(connector);
         ssh_connector_reset_pollevents(connector);
 
         return w;
@@ -642,8 +719,8 @@ ssh_connector_channel_write_wontblock_cb(ssh_session session,
 
             return 0;
         }
-        connector->in_available = 0;
-        connector->out_wontblock = 0;
+
+        ssh_connector_update_flags_after_io(connector);
     } else {
         connector->out_wontblock = 1;
     }

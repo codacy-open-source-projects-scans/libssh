@@ -376,7 +376,7 @@ torture_auth_autopubkey_protected_auth_function (const char *prompt, char *buf, 
     assert_int_equal(echo, 0);
     assert_int_equal(verify, 0);
 
-    expected_id = ssh_path_expand_escape(data->session, "%d/id_rsa_protected");
+    expected_id = ssh_path_expand_escape(data->session, "%d/.ssh/id_rsa_protected");
     assert_true(expected_id != NULL);
 
     rc = ssh_userauth_publickey_auto_get_current_identity(data->session, &id);
@@ -429,7 +429,7 @@ static void torture_auth_autopubkey_protected(void **state) {
 
     /* Try id_rsa_protected first.
      */
-    rc = ssh_options_set(session, SSH_OPTIONS_IDENTITY, "%d/id_rsa_protected");
+    rc = ssh_options_set(session, SSH_OPTIONS_IDENTITY, "%d/.ssh/id_rsa_protected");
     assert_int_equal(rc, SSH_OK);
 
     rc = ssh_connect(session);

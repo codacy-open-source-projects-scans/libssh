@@ -2684,7 +2684,7 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
                                const char *filename)
 {
     char key_buf[MAX_LINE_SIZE];
-    char host[256];
+    char *host = NULL;
     char *b64_key = NULL;
     char *user = NULL;
     FILE *fp = NULL;
@@ -2699,8 +2699,8 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
         return SSH_ERROR;
     }
 
-    rc = gethostname(host, sizeof(host));
-    if (rc < 0) {
+    host = ssh_get_local_hostname();
+    if (host == NULL) {
         free(user);
         return SSH_ERROR;
     }
@@ -2708,6 +2708,7 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
     rc = ssh_pki_export_pubkey_base64(key, &b64_key);
     if (rc < 0) {
         free(user);
+        free(host);
         return SSH_ERROR;
     }
 
@@ -2718,6 +2719,7 @@ int ssh_pki_export_pubkey_file(const ssh_key key,
                   user,
                   host);
     free(user);
+    free(host);
     free(b64_key);
     if (rc < 0) {
         return SSH_ERROR;

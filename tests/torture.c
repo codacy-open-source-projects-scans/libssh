@@ -389,6 +389,143 @@ failed:
     return NULL;
 }
 
+/* always return verification successful */
+static int verify_knownhost_trust_all(UNUSED_PARAM(ssh_session jump_session),
+                                      UNUSED_PARAM(void *user))
+{
+    return SSH_OK;
+}
+
+/**
+ * @brief Create a session connected to server via proxyjump
+ *
+ * @param[in] state A pointer to a pointer to an initialized torture_state
+ *                  structure
+ *
+ * @warning  It is expected that both sshd servers are setup before calling
+ *           this, see torture_setup_sshd_server() and
+ *           torture_setup_sshd_servers()
+ *
+ * TODO: If needed, in future, we can extend this function to:
+ *   - allow caller to pass server host port, user, password similar to
+ *     torture_ssh_session() or club this with that function
+ *
+ *   - allow caller to customize jump hosts and callbacks for each of them
+ */
+ssh_session torture_ssh_session_proxyjump(void)
+{
+    /*
+     * We'll setup the connection chain:
+     * - client
+     * - jump host 1: doe (sshd server, IPV4)
+     * - jump host 2: alice (sshd server1, IPV6)
+     * - server: alice (sshd server, IPV4)
+     */
+    char jump_host_list[1024] = {0};
+    int jump_host_count = 2;
+    const char *jump_host_1_address = torture_server_address(AF_INET);
+    const char *jump_host_2_address = torture_server1_address(AF_INET6);
+    struct ssh_jump_callbacks_struct jump_host_callbacks = {
+        .before_connection = NULL,
+        .verify_knownhost = verify_knownhost_trust_all,
+        .authenticate = NULL,
+    };
+
+    ssh_session session = NULL;
+    bool process_config = false;
+    int rc, i;
+
+    session = ssh_new();
+    if (session == NULL) {
+        fprintf(stderr, "Failed to create new ssh session\n");
+        goto failed;
+    }
+
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, TORTURE_SSH_SERVER);
+    if (rc < 0) {
+        fprintf(stderr,
+                "Failed to set session host: %s\n",
+                ssh_get_error(session));
+        goto failed;
+    }
+
+    rc = ssh_options_set(session, SSH_OPTIONS_USER, TORTURE_SSH_USER_ALICE);
+    if (rc < 0) {
+        fprintf(stderr,
+                "Failed to set session user: %s\n",
+                ssh_get_error(session));
+        goto failed;
+    }
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PROCESS_CONFIG, &process_config);
+    if (rc < 0) {
+        fprintf(stderr,
+                "Failed to set process config option: %s\n",
+                ssh_get_error(session));
+        goto failed;
+    }
+
+    rc = snprintf(jump_host_list,
+                  sizeof(jump_host_list),
+                  "doe@%s:22,alice@%s:22",
+                  jump_host_1_address,
+                  jump_host_2_address);
+    if (rc < 0) {
+        fprintf(stderr, "snprintf failed: %s\n", strerror(errno));
+        goto failed;
+    }
+
+    if (rc >= (int)sizeof(jump_host_list)) {
+        fprintf(stderr, "Insufficient jump host list buffer size\n");
+        goto failed;
+    }
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PROXYJUMP, jump_host_list);
+    if (rc < 0) {
+        fprintf(stderr,
+                "Failed to set jump hosts for the session: %s\n",
+                ssh_get_error(session));
+        goto failed;
+    }
+
+    for (i = 0; i < jump_host_count; ++i) {
+        rc = ssh_options_set(session,
+                             SSH_OPTIONS_PROXYJUMP_CB_LIST_APPEND,
+                             &jump_host_callbacks);
+        if (rc < 0) {
+            fprintf(stderr,
+                    "Failed to set jump callbacks for jump host %d: %s\n",
+                    i + 1,
+                    ssh_get_error(session));
+            goto failed;
+        }
+    }
+
+    rc = ssh_connect(session);
+    if (rc != SSH_OK) {
+        fprintf(stderr,
+                "Failed to connect to ssh server: %s\n",
+                ssh_get_error(session));
+        goto failed;
+    }
+
+    rc = ssh_userauth_publickey_auto(session, NULL, NULL);
+    if (rc != SSH_AUTH_SUCCESS) {
+        fprintf(stderr, "Public key authentication did not succeed\n");
+        goto failed;
+    }
+
+    return session;
+
+failed:
+    if (ssh_is_connected(session)) {
+        ssh_disconnect(session);
+    }
+    ssh_free(session);
+
+    return NULL;
+}
+
 #ifdef WITH_SERVER
 
 ssh_bind torture_ssh_bind(const char *addr,

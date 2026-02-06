@@ -11,19 +11,37 @@
 
 #define MAX_XFER_BUF_SIZE 16384
 
+#define DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(TEST_NAME) \
+    {                            \
+        #TEST_NAME,              \
+        TEST_NAME,               \
+        session_setup,           \
+        session_teardown,        \
+        NULL                     \
+    },                           \
+    {                            \
+        #TEST_NAME"_proxyjump",  \
+        TEST_NAME,               \
+        session_proxyjump_setup, \
+        session_teardown,        \
+        NULL                     \
+    }
+
 static int sshd_setup(void **state)
 {
     torture_setup_sshd_server(state, false);
+    torture_setup_sshd_servers(state, false);
     return 0;
 }
 
 static int sshd_teardown(void **state)
 {
+    /* this will take care of the server1 teardown too */
     torture_teardown_sshd_server(state);
     return 0;
 }
 
-static int session_setup(void **state)
+static int session_setup_helper(void **state, bool with_proxyjump)
 {
     struct torture_state *s = *state;
     struct passwd *pwd = NULL;
@@ -35,17 +53,31 @@ static int session_setup(void **state)
     rc = setuid(pwd->pw_uid);
     assert_return_code(rc, errno);
 
-    s->ssh.session = torture_ssh_session(s,
-                                         TORTURE_SSH_SERVER,
-                                         NULL,
-                                         TORTURE_SSH_USER_ALICE,
-                                         NULL);
+    if (with_proxyjump) {
+        s->ssh.session = torture_ssh_session_proxyjump();
+    } else {
+        s->ssh.session = torture_ssh_session(s,
+                                             TORTURE_SSH_SERVER,
+                                             NULL,
+                                             TORTURE_SSH_USER_ALICE,
+                                             NULL);
+    }
     assert_non_null(s->ssh.session);
 
     s->ssh.tsftp = torture_sftp_session(s->ssh.session);
     assert_non_null(s->ssh.tsftp);
 
     return 0;
+}
+
+static int session_setup(void **state)
+{
+    return session_setup_helper(state, false);
+}
+
+static int session_proxyjump_setup(void **state)
+{
+    return session_setup_helper(state, true);
 }
 
 static int session_teardown(void **state)
@@ -722,37 +754,18 @@ int torture_run_tests(void)
 {
     int rc;
     struct CMUnitTest tests[] = {
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_read_file,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_read_more_than_cap,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_write_file,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_write_more_than_cap,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_read_negative,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_write_negative,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_read_unordered_wait,
-                                        session_setup,
-                                        session_teardown),
-
-        cmocka_unit_test_setup_teardown(torture_sftp_aio_write_unordered_wait,
-                                        session_setup,
-                                        session_teardown),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(torture_sftp_aio_read_file),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(
+            torture_sftp_aio_read_more_than_cap),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(torture_sftp_aio_write_file),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(
+            torture_sftp_aio_write_more_than_cap),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(torture_sftp_aio_read_negative),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(torture_sftp_aio_write_negative),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(
+            torture_sftp_aio_read_unordered_wait),
+        DIRECT_AND_PROXYJUMP_SETUP_TEARDOWN(
+            torture_sftp_aio_write_unordered_wait),
     };
 
     ssh_init();

@@ -115,6 +115,8 @@ ssh_session torture_ssh_session(struct torture_state *s,
                                 const char *user,
                                 const char *password);
 
+ssh_session torture_ssh_session_proxyjump(void);
+
 ssh_bind torture_ssh_bind(const char *addr,
                           const unsigned int port,
                           enum ssh_keytypes_e key_type,

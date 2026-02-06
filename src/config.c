@@ -493,6 +493,10 @@ ssh_config_parse_proxy_jump(ssh_session session, const char *s, bool do_parsing)
     bool parse_entry = do_parsing;
     bool libssh_proxy_jump = ssh_libssh_proxy_jumps();
 
+    if (do_parsing) {
+        SAFE_FREE(session->opts.proxy_jumps_str);
+        ssh_proxyjumps_free(session->opts.proxy_jumps);
+    }
     /* Special value none disables the proxy */
     cmp = strcasecmp(s, "none");
     if (cmp == 0) {
@@ -507,6 +511,17 @@ ssh_config_parse_proxy_jump(ssh_session session, const char *s, bool do_parsing)
     if (c == NULL) {
         ssh_set_error_oom(session);
         return SSH_ERROR;
+    }
+
+    if (do_parsing) {
+        /* Store the whole string in sesion */
+        SAFE_FREE(session->opts.proxy_jumps_str);
+        session->opts.proxy_jumps_str = strdup(s);
+        if (session->opts.proxy_jumps_str == NULL) {
+            free(c);
+            ssh_set_error_oom(session);
+            return SSH_ERROR;
+        }
     }
 
     cp = c;

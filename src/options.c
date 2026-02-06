@@ -1197,7 +1197,6 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 ssh_set_error_invalid(session);
                 return -1;
             } else {
-                ssh_proxyjumps_free(session->opts.proxy_jumps);
                 rc = ssh_config_parse_proxy_jump(session, v, true);
                 if (rc != SSH_OK) {
                     return SSH_ERROR;
@@ -1562,7 +1561,16 @@ int ssh_options_get_port(ssh_session session, unsigned int* port_target) {
  *              - SSH_OPTIONS_IDENTITY:
  *                Get the first identity file name (const char *).\n
  *                \n
- *                By default id_rsa, id_ecdsa and id_ed25519 files are used.
+ *                By default `id_rsa`, `id_ecdsa`, `id_ed25519`, `id_ecdsa_sk`
+ *                and `id_ed25519_sk` (when SK support is built in) files are
+ *                used.
+ *
+ *              - SSH_OPTIONS_NEXT_IDENTITY:
+ *                Get the next identity file name (const char *).\n
+ *                \n
+ *                Repeat calls to get all key paths. SSH_EOF is returned when
+ *                the end of list is reached. Another call will start another
+ *                iteration over the same list.
  *
  *              - SSH_OPTIONS_PROXYCOMMAND:
  *                Get the proxycommand necessary to log into the
@@ -1655,6 +1663,30 @@ int ssh_options_get(ssh_session session, enum ssh_options_e type, char** value)
                 return SSH_ERROR;
             }
             src = ssh_iterator_value(char *, it);
+            break;
+        }
+
+        case SSH_OPTIONS_NEXT_IDENTITY: {
+            if (session->opts.identity_it != NULL) {
+                /* Move to the next item */
+                session->opts.identity_it = session->opts.identity_it->next;
+                if (session->opts.identity_it == NULL) {
+                    *value = NULL;
+                    return SSH_EOF;
+                }
+            } else {
+                /* Get iterator from opts */
+                struct ssh_iterator *it = NULL;
+                it = ssh_list_get_iterator(session->opts.identity);
+                if (it == NULL) {
+                    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+                }
+                if (it == NULL) {
+                    return SSH_ERROR;
+                }
+                session->opts.identity_it = it;
+            }
+            src = ssh_iterator_value(char *, session->opts.identity_it);
             break;
         }
 
@@ -1963,7 +1995,7 @@ int ssh_options_parse_config(ssh_session session, const char *filename)
 
     /* set default filename */
     if (filename == NULL) {
-        expanded_filename = ssh_path_expand_escape(session, "%d/config");
+        expanded_filename = ssh_path_expand_escape(session, "%d/.ssh/config");
     } else {
         expanded_filename = ssh_path_expand_escape(session, filename);
     }
@@ -2021,7 +2053,7 @@ int ssh_options_apply(ssh_session session)
 
     if ((session->opts.exp_flags & SSH_OPT_EXP_FLAG_KNOWNHOSTS) == 0) {
         if (session->opts.knownhosts == NULL) {
-            tmp = ssh_path_expand_escape(session, "%d/known_hosts");
+            tmp = ssh_path_expand_escape(session, "%d/.ssh/known_hosts");
         } else {
             tmp = ssh_path_expand_escape(session, session->opts.knownhosts);
         }

@@ -421,7 +421,7 @@ int ssh_server_gss_kex_process_init(ssh_session session, ssh_buffer packet)
     gss_name_t client_name = GSS_C_NO_NAME;
     OM_uint32 ret_flags = 0;
     gss_buffer_desc mic = GSS_C_EMPTY_BUFFER, msg = GSS_C_EMPTY_BUFFER;
-    char hostname[NI_MAXHOST] = {0};
+    char *hostname = NULL;
     char err_msg[SSH_ERRNO_MSG_MAX] = {0};
 
     rc = ssh_buffer_unpack(packet, "S", &otoken);
@@ -538,8 +538,8 @@ int ssh_server_gss_kex_process_init(ssh_session session, ssh_buffer packet)
         goto error;
     }
 
-    rc = gethostname(hostname, 64);
-    if (rc != 0) {
+    hostname = ssh_get_local_hostname();
+    if (hostname == NULL) {
         SSH_LOG(SSH_LOG_TRACE,
                 "Error getting hostname: %s",
                 ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
@@ -547,6 +547,7 @@ int ssh_server_gss_kex_process_init(ssh_session session, ssh_buffer packet)
     }
 
     rc = ssh_gssapi_import_name(session->gssapi, hostname);
+    SAFE_FREE(hostname);
     if (rc != SSH_OK) {
         goto error;
     }
