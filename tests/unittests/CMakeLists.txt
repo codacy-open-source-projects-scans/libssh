@@ -126,6 +126,13 @@ if (HAVE_LIBFIDO2)
     )
 endif (HAVE_LIBFIDO2)
 
+if (WITH_SFTP)
+    set(LIBSSH_UNIT_TESTS
+        ${LIBSSH_UNIT_TESTS}
+        torture_unit_sftp
+    )
+endif (WITH_SFTP)
+
 foreach(_UNIT_TEST ${LIBSSH_UNIT_TESTS})
     add_cmocka_test(${_UNIT_TEST}
                     SOURCES ${_UNIT_TEST}.c

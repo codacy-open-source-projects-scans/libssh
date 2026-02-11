@@ -243,7 +243,7 @@ static int ssh_known_hosts_read_entries(const char *match,
     FILE *fp = NULL;
     int rc;
 
-    fp = fopen(filename, "r");
+    fp = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (fp == NULL) {
         char err_msg[SSH_ERRNO_MSG_MAX] = {0};
         SSH_LOG(SSH_LOG_TRACE, "Failed to open the known_hosts file '%s': %s",

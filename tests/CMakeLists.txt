@@ -419,6 +419,9 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     file(READ keys/pkcs11/id_pkcs11_ecdsa_256_openssh.pub CONTENTS)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/charlie/.ssh/authorized_keys "${CONTENTS}")
 
+    # Create home directory for noneuser (for "none" authentication test)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/home/noneuser/.ssh)
+
     file(READ keys/pkcs11/id_pkcs11_ecdsa_384_openssh.pub CONTENTS)
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/home/charlie/.ssh/authorized_keys "${CONTENTS}")
 

@@ -238,6 +238,31 @@ static void torture_client_config_suppress(void **state)
     assert_string_equal(s->ssh.session->opts.username, "bob");
 }
 
+static void torture_client_config_expand_bad(void **state)
+{
+    ssh_session session = ssh_new();
+    int ret = 0;
+
+    (void)state;
+
+    assert_non_null(session);
+
+    /* The hash without host fails, but does not crash */
+    ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, "%C");
+
+    ret = ssh_options_apply(session);
+    assert_ssh_return_code_equal(session, ret, SSH_ERROR);
+
+    /* The hash without host fails, but does not crash */
+    ssh_options_set(session, SSH_OPTIONS_HOST, TORTURE_SSH_SERVER);
+    ssh_options_set(session, SSH_OPTIONS_KNOWNHOSTS, "%C");
+
+    ret = ssh_options_apply(session);
+    assert_ssh_return_code_equal(session, ret, SSH_OK);
+
+    ssh_free(session);
+}
+
 static void torture_client_config_expand(void **state)
 {
     struct torture_state *s = *state;
@@ -434,8 +459,9 @@ static void torture_client_config_expand(void **state)
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
-        /* Keep this first -- following setup is changing user to bob, which we
+        /* Keep these first -- following setup is changing user to bob, which we
          * do not want */
+        cmocka_unit_test(torture_client_config_expand_bad),
         cmocka_unit_test_setup_teardown(torture_client_config_expand,
                                         setup_session,
                                         teardown_session),
@@ -452,7 +478,6 @@ int torture_run_tests(void) {
                                         setup_config_files,
                                         teardown),
     };
-
 
     ssh_init();
     torture_filter_tests(tests);

@@ -228,6 +228,44 @@ static void torture_auth_none_max_tries(void **state) {
     torture_update_sshd_config(state, "");
 }
 
+static void torture_auth_none_success(void **state)
+{
+    struct torture_state *s = *state;
+    const char *additional_config = "PermitEmptyPasswords yes\n"
+                                    "PasswordAuthentication yes\n"
+                                    "KbdInteractiveAuthentication no\n"
+                                    "PubkeyAuthentication no\n"
+                                    "AuthenticationMethods none\n";
+
+    ssh_session session = s->ssh.session;
+    int rc;
+
+    torture_update_sshd_config(state, additional_config);
+
+    /* Use noneuser which has an empty password set in shadow.in
+     * When PermitEmptyPasswords is yes and PasswordAuthentication is yes,
+     * OpenSSH's userauth_none() internally calls mm_auth_password() with
+     * an empty password, which succeeds for users with empty passwords.
+     */
+    rc = ssh_options_set(session, SSH_OPTIONS_USER, TORTURE_SSH_USER_NONEUSER);
+    if (rc != SSH_OK) {
+        goto cleanup;
+    }
+
+    rc = ssh_connect(session);
+    if (rc != SSH_OK) {
+        goto cleanup;
+    }
+
+    rc = ssh_userauth_none(session, NULL);
+    assert_int_equal(rc, SSH_AUTH_SUCCESS);
+
+cleanup:
+    torture_update_sshd_config(state, "");
+    if (rc != SSH_OK && rc != SSH_AUTH_SUCCESS) {
+        assert_int_equal(rc, SSH_OK);
+    }
+}
 
 static void torture_auth_pubkey(void **state) {
     struct torture_state *s = *state;
@@ -1373,6 +1411,9 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_auth_none_nonblocking,
                                         session_setup,
                                         session_teardown),
+        cmocka_unit_test_setup_teardown(torture_auth_none_success,
+                                        session_setup,
+                                        session_teardown),
         cmocka_unit_test_setup_teardown(torture_auth_none_max_tries,
                                         session_setup,
                                         session_teardown),
@@ -1424,9 +1465,10 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_auth_agent_identities_only,
                                         agent_setup,
                                         agent_teardown),
-        cmocka_unit_test_setup_teardown(torture_auth_agent_identities_only_protected,
-                                        agent_setup,
-                                        agent_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_auth_agent_identities_only_protected,
+            agent_setup,
+            agent_teardown),
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_types,
                                         pubkey_setup,
                                         session_teardown),
@@ -1436,15 +1478,17 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_types_ecdsa,
                                         pubkey_setup,
                                         session_teardown),
-        cmocka_unit_test_setup_teardown(torture_auth_pubkey_types_ecdsa_nonblocking,
-                                        pubkey_setup,
-                                        session_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_auth_pubkey_types_ecdsa_nonblocking,
+            pubkey_setup,
+            session_teardown),
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_types_ed25519,
                                         pubkey_setup,
                                         session_teardown),
-        cmocka_unit_test_setup_teardown(torture_auth_pubkey_types_ed25519_nonblocking,
-                                        pubkey_setup,
-                                        session_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_auth_pubkey_types_ed25519_nonblocking,
+            pubkey_setup,
+            session_teardown),
 #ifdef WITH_FIDO2
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_types_sk_ecdsa,
                                         pubkey_setup,
@@ -1456,9 +1500,10 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_rsa_key_size,
                                         pubkey_setup,
                                         session_teardown),
-        cmocka_unit_test_setup_teardown(torture_auth_pubkey_rsa_key_size_nonblocking,
-                                        pubkey_setup,
-                                        session_teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_auth_pubkey_rsa_key_size_nonblocking,
+            pubkey_setup,
+            session_teardown),
         cmocka_unit_test_setup_teardown(torture_auth_pubkey_skip_none,
                                         pubkey_setup,
                                         session_teardown),

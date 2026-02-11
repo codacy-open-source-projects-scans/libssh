@@ -2494,80 +2494,138 @@ static void torture_config_match_pattern(void **state)
     (void) state;
 
     /* Simple test "a" matches "a" */
-    rv = match_pattern("a", "a", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "a");
     assert_int_equal(rv, 1);
 
     /* Simple test "a" does not match "b" */
-    rv = match_pattern("a", "b", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "b");
     assert_int_equal(rv, 0);
 
     /* NULL arguments are correctly handled */
-    rv = match_pattern("a", NULL, MAX_MATCH_RECURSION);
+    rv = match_pattern("a", NULL);
     assert_int_equal(rv, 0);
-    rv = match_pattern(NULL, "a", MAX_MATCH_RECURSION);
+    rv = match_pattern(NULL, "a");
     assert_int_equal(rv, 0);
 
     /* Simple wildcard ? is handled in pattern */
-    rv = match_pattern("a", "?", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "?");
     assert_int_equal(rv, 1);
-    rv = match_pattern("aa", "?", MAX_MATCH_RECURSION);
+    rv = match_pattern("aa", "?");
     assert_int_equal(rv, 0);
     /* Wildcard in search string */
-    rv = match_pattern("?", "a", MAX_MATCH_RECURSION);
+    rv = match_pattern("?", "a");
     assert_int_equal(rv, 0);
-    rv = match_pattern("?", "?", MAX_MATCH_RECURSION);
+    rv = match_pattern("?", "?");
     assert_int_equal(rv, 1);
 
     /* Simple wildcard * is handled in pattern */
-    rv = match_pattern("a", "*", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "*");
     assert_int_equal(rv, 1);
-    rv = match_pattern("aa", "*", MAX_MATCH_RECURSION);
+    rv = match_pattern("aa", "*");
     assert_int_equal(rv, 1);
     /* Wildcard in search string */
-    rv = match_pattern("*", "a", MAX_MATCH_RECURSION);
+    rv = match_pattern("*", "a");
     assert_int_equal(rv, 0);
-    rv = match_pattern("*", "*", MAX_MATCH_RECURSION);
+    rv = match_pattern("*", "*");
     assert_int_equal(rv, 1);
 
     /* More complicated patterns */
-    rv = match_pattern("a", "*a", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "*a");
     assert_int_equal(rv, 1);
-    rv = match_pattern("a", "a*", MAX_MATCH_RECURSION);
+    rv = match_pattern("a", "a*");
     assert_int_equal(rv, 1);
-    rv = match_pattern("abababc", "*abc", MAX_MATCH_RECURSION);
+    rv = match_pattern("abababc", "*abc");
     assert_int_equal(rv, 1);
-    rv = match_pattern("ababababca", "*abc", MAX_MATCH_RECURSION);
+    rv = match_pattern("ababababca", "*abc");
     assert_int_equal(rv, 0);
-    rv = match_pattern("ababababca", "*abc*", MAX_MATCH_RECURSION);
+    rv = match_pattern("ababababca", "*abc*");
     assert_int_equal(rv, 1);
 
     /* Multiple wildcards in row */
-    rv = match_pattern("aa", "??", MAX_MATCH_RECURSION);
+    rv = match_pattern("aa", "??");
     assert_int_equal(rv, 1);
-    rv = match_pattern("bba", "??a", MAX_MATCH_RECURSION);
+    rv = match_pattern("bba", "??a");
     assert_int_equal(rv, 1);
-    rv = match_pattern("aaa", "**a", MAX_MATCH_RECURSION);
+    rv = match_pattern("aaa", "**a");
     assert_int_equal(rv, 1);
-    rv = match_pattern("bbb", "**a", MAX_MATCH_RECURSION);
+    rv = match_pattern("bbb", "**a");
     assert_int_equal(rv, 0);
 
     /* Consecutive asterisks do not make sense and do not need to recurse */
-    rv = match_pattern("hostname", "**********pattern", 5);
+    rv = match_pattern("hostname", "**********pattern");
     assert_int_equal(rv, 0);
-    rv = match_pattern("hostname", "pattern**********", 5);
+    rv = match_pattern("hostname", "pattern**********");
     assert_int_equal(rv, 0);
-    rv = match_pattern("pattern", "***********pattern", 5);
+    rv = match_pattern("pattern", "***********pattern");
     assert_int_equal(rv, 1);
-    rv = match_pattern("pattern", "pattern***********", 5);
+    rv = match_pattern("pattern", "pattern***********");
     assert_int_equal(rv, 1);
 
-    /* Limit the maximum recursion */
-    rv = match_pattern("hostname", "*p*a*t*t*e*r*n*", 5);
+    rv = match_pattern("hostname", "*p*a*t*t*e*r*n*");
     assert_int_equal(rv, 0);
-    /* Too much recursion */
-    rv = match_pattern("pattern", "*p*a*t*t*e*r*n*", 5);
+    rv = match_pattern("pattern", "*p*a*t*t*e*r*n*");
+    assert_int_equal(rv, 1);
+
+    /* Regular Expression Denial of Service */
+    rv = match_pattern("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                       "*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a");
+    assert_int_equal(rv, 1);
+    rv = match_pattern("ababababababababababababababababababababab",
+                       "*a*b*a*b*a*b*a*b*a*b*a*b*a*b*a*b");
+    assert_int_equal(rv, 1);
+
+    /* A lot of backtracking */
+    rv = match_pattern("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaax",
+                       "a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*ax");
+    assert_int_equal(rv, 1);
+
+    /* Test backtracking: *a matches first 'a', fails on 'b', must backtrack */
+    rv = match_pattern("axaxaxb", "*a*b");
+    assert_int_equal(rv, 1);
+
+    /* Test greedy consumption with suffix */
+    rv = match_pattern("foo_bar_baz_bar", "*bar");
+    assert_int_equal(rv, 1);
+
+    /* Test exact suffix requirement (ensure no partial match acceptance) */
+    rv = match_pattern("foobar_extra", "*bar");
     assert_int_equal(rv, 0);
 
+    /* Test multiple distinct wildcards */
+    rv = match_pattern("a_very_long_string_with_a_pattern", "*long*pattern");
+    assert_int_equal(rv, 1);
+
+    /* ? inside a * sequence */
+    rv = match_pattern("abcdefg", "a*c?e*g");
+    assert_int_equal(rv, 1);
+
+    /* Consecutive mixed wildcards */
+    rv = match_pattern("abc", "*?c");
+    assert_int_equal(rv, 1);
+
+    /* ? at the very end after * */
+    rv = match_pattern("abc", "ab?");
+    assert_int_equal(rv, 1);
+    rv = match_pattern("abc", "ab*?");
+    assert_int_equal(rv, 1);
+
+    /* Consecutive stars should be collapsed or handled gracefully */
+    rv = match_pattern("abc", "a**c");
+    assert_int_equal(rv, 1);
+    rv = match_pattern("abc", "***");
+    assert_int_equal(rv, 1);
+
+    /* Empty string handling */
+    rv = match_pattern("", "*");
+    assert_int_equal(rv, 1);
+    rv = match_pattern("", "?");
+    assert_int_equal(rv, 0);
+    rv = match_pattern("", "");
+    assert_int_equal(rv, 1);
+
+    /* Pattern longer than string */
+    rv = match_pattern("short", "short_but_longer");
+    assert_int_equal(rv, 0);
 }
 
 /* Identity file can be specified multiple times in the configuration
@@ -2875,6 +2933,23 @@ static void torture_config_jump(void **state)
     printf("%s: EOF\n", __func__);
 }
 
+/* Invalid configuration files
+ */
+static void torture_config_invalid(void **state)
+{
+    ssh_session session = *state;
+
+    ssh_options_set(session, SSH_OPTIONS_HOST, "Bar");
+
+    /* non-regular file -- ignored (or missing on non-unix) so OK */
+    _parse_config(session, "/dev/random", NULL, SSH_OK);
+
+#ifndef _WIN32
+    /* huge file -- ignored (or missing on non-unix) so OK */
+    _parse_config(session, "/proc/kcore", NULL, SSH_OK);
+#endif
+}
+
 int torture_run_tests(void)
 {
     int rc;
@@ -3027,6 +3102,9 @@ int torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_jump,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_invalid,
                                         setup,
                                         teardown),
     };

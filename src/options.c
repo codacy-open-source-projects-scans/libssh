@@ -907,7 +907,7 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
             SAFE_FREE(session->opts.global_knownhosts);
             if (v == NULL) {
                 session->opts.global_knownhosts =
-                    strdup("/etc/ssh/ssh_known_hosts");
+                    strdup(GLOBAL_CONF_DIR "/ssh_known_hosts");
                 if (session->opts.global_knownhosts == NULL) {
                     ssh_set_error_oom(session);
                     return -1;
@@ -2008,11 +2008,16 @@ int ssh_options_parse_config(ssh_session session, const char *filename)
         goto out;
     }
     if (filename == NULL) {
-        if ((fp = fopen(GLOBAL_CLIENT_CONFIG, "r")) != NULL) {
+        fp = ssh_strict_fopen(GLOBAL_CLIENT_CONFIG, SSH_MAX_CONFIG_FILE_SIZE);
+        if (fp != NULL) {
             filename = GLOBAL_CLIENT_CONFIG;
 #ifdef USR_GLOBAL_CLIENT_CONFIG
-        } else if ((fp = fopen(USR_GLOBAL_CLIENT_CONFIG, "r")) != NULL) {
-            filename = USR_GLOBAL_CLIENT_CONFIG;
+        } else {
+            fp = ssh_strict_fopen(USR_GLOBAL_CLIENT_CONFIG,
+                                  SSH_MAX_CONFIG_FILE_SIZE);
+            if (fp != NULL) {
+                filename = USR_GLOBAL_CLIENT_CONFIG;
+            }
 #endif
         }
 
@@ -2067,7 +2072,7 @@ int ssh_options_apply(ssh_session session)
 
     if ((session->opts.exp_flags & SSH_OPT_EXP_FLAG_GLOBAL_KNOWNHOSTS) == 0) {
         if (session->opts.global_knownhosts == NULL) {
-            tmp = strdup("/etc/ssh/ssh_known_hosts");
+            tmp = strdup(GLOBAL_CONF_DIR "/ssh_known_hosts");
         } else {
             tmp = ssh_path_expand_escape(session,
                                          session->opts.global_knownhosts);

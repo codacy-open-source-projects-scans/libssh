@@ -1252,6 +1252,36 @@ static void torture_ssh_is_ipaddr(void **state) {
     assert_int_equal(rc, 0);
 }
 
+static void torture_ssh_get_hexa(void **state)
+{
+    const unsigned char *bin = NULL;
+    char *hex = NULL;
+
+    (void)state;
+
+    /* Null pointer should not crash */
+    bin = NULL;
+    hex = ssh_get_hexa(bin, 0);
+    assert_null(hex);
+
+    /* Null pointer should not crash regardless the length */
+    bin = NULL;
+    hex = ssh_get_hexa(bin, 99);
+    assert_null(hex);
+
+    /* Zero length input is not much useful. Just expect NULL too */
+    bin = (const unsigned char *)"";
+    hex = ssh_get_hexa(bin, 0);
+    assert_null(hex);
+
+    /* Valid inputs */
+    bin = (const unsigned char *)"\x00\xFF";
+    hex = ssh_get_hexa(bin, 2);
+    assert_non_null(hex);
+    assert_string_equal(hex, "00:ff");
+    ssh_string_free_char(hex);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -1288,6 +1318,7 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_ssh_check_hostname_syntax),
         cmocka_unit_test(torture_ssh_check_username_syntax),
         cmocka_unit_test(torture_ssh_is_ipaddr),
+        cmocka_unit_test(torture_ssh_get_hexa),
     };
 
     ssh_init();

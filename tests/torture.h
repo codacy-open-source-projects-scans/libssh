@@ -51,6 +51,7 @@
 
 #define TORTURE_SSH_USER_ALICE "alice"
 #define TORTURE_SSH_USER_CHARLIE "charlie"
+#define TORTURE_SSH_USER_NONEUSER "noneuser"
 
 /* Used by main to communicate with parse_opt. */
 struct argument_s {

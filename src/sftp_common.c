@@ -461,19 +461,24 @@ enum sftp_longname_field_e {
 static char * sftp_parse_longname(const char *longname,
                                   enum sftp_longname_field_e longname_field)
 {
-    const char *p, *q;
+    const char *p = NULL, *q = NULL;
     size_t len, field = 0;
+
+    if (longname == NULL || longname_field < SFTP_LONGNAME_PERM ||
+        longname_field > SFTP_LONGNAME_NAME) {
+        return NULL;
+    }
 
     p = longname;
     /*
      * Find the beginning of the field which is specified
      * by sftp_longname_field_e.
      */
-    while (field != longname_field) {
+    while (*p != '\0' && field != longname_field) {
         if (isspace(*p)) {
             field++;
             p++;
-            while (*p && isspace(*p)) {
+            while (*p != '\0' && isspace(*p)) {
                 p++;
             }
         } else {
@@ -481,8 +486,13 @@ static char * sftp_parse_longname(const char *longname,
         }
     }
 
+    /* If we reached NULL before we got our field fail */
+    if (field != longname_field) {
+        return NULL;
+    }
+
     q = p;
-    while (! isspace(*q)) {
+    while (*q != '\0' && !isspace(*q)) {
         q++;
     }
 

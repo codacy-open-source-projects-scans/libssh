@@ -104,9 +104,9 @@ pki_ed25519_key_cmp(const ssh_key k1, const ssh_key k2, enum ssh_keycmp_e what)
         }
         /* In the internal implementation, the private key is the concatenation
          * of the private seed with the public key. */
-        cmp = memcmp(k1->ed25519_privkey,
-                     k2->ed25519_privkey,
-                     2 * ED25519_KEY_LEN);
+        cmp = secure_memcmp(k1->ed25519_privkey,
+                            k2->ed25519_privkey,
+                            2 * ED25519_KEY_LEN);
         if (cmp != 0) {
             return 1;
         }

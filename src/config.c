@@ -256,10 +256,9 @@ local_parse_file(ssh_session session,
         return;
     }
 
-    f = fopen(filename, "r");
+    f = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (f == NULL) {
-        SSH_LOG(SSH_LOG_RARE, "Cannot find file %s to load",
-                filename);
+        /* The underlying function logs the reasons */
         return;
     }
 
@@ -514,7 +513,7 @@ ssh_config_parse_proxy_jump(ssh_session session, const char *s, bool do_parsing)
     }
 
     if (do_parsing) {
-        /* Store the whole string in sesion */
+        /* Store the whole string in session */
         SAFE_FREE(session->opts.proxy_jumps_str);
         session->opts.proxy_jumps_str = strdup(s);
         if (session->opts.proxy_jumps_str == NULL) {
@@ -1708,8 +1707,9 @@ int ssh_config_parse_file(ssh_session session, const char *filename)
     int rv;
     bool global = 0;
 
-    fp = fopen(filename, "r");
+    fp = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (fp == NULL) {
+        /* The underlying function logs the reasons */
         return 0;
     }
 

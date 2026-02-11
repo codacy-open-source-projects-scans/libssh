@@ -217,7 +217,7 @@ local_parse_file(ssh_bind bind,
         return;
     }
 
-    f = fopen(filename, "r");
+    f = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (f == NULL) {
         SSH_LOG(SSH_LOG_RARE, "Cannot find file %s to load",
                 filename);
@@ -655,7 +655,7 @@ int ssh_bind_config_parse_file(ssh_bind bind, const char *filename)
      * option to be redefined later by another file. */
     uint8_t seen[BIND_CFG_MAX] = {0};
 
-    f = fopen(filename, "r");
+    f = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (f == NULL) {
         return 0;
     }

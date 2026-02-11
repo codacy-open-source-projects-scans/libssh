@@ -583,44 +583,51 @@ int sftp_init(sftp_session sftp)
     return 0;
 }
 
-unsigned int sftp_extensions_get_count(sftp_session sftp) {
-  if (sftp == NULL || sftp->ext == NULL) {
-    return 0;
-  }
+unsigned int sftp_extensions_get_count(sftp_session sftp)
+{
+    if (sftp == NULL || sftp->ext == NULL) {
+        return 0;
+    }
 
-  return sftp->ext->count;
+    return sftp->ext->count;
 }
 
-const char *sftp_extensions_get_name(sftp_session sftp, unsigned int idx) {
-  if (sftp == NULL)
-    return NULL;
-  if (sftp->ext == NULL || sftp->ext->name == NULL) {
-    ssh_set_error_invalid(sftp->session);
-    return NULL;
-  }
+const char *sftp_extensions_get_name(sftp_session sftp, unsigned int idx)
+{
+    if (sftp == NULL) {
+        return NULL;
+    }
 
-  if (idx > sftp->ext->count) {
-    ssh_set_error_invalid(sftp->session);
-    return NULL;
-  }
+    if (sftp->ext == NULL || sftp->ext->name == NULL) {
+        ssh_set_error_invalid(sftp->session);
+        return NULL;
+    }
 
-  return sftp->ext->name[idx];
+    if (idx >= sftp->ext->count) {
+        ssh_set_error_invalid(sftp->session);
+        return NULL;
+    }
+
+    return sftp->ext->name[idx];
 }
 
-const char *sftp_extensions_get_data(sftp_session sftp, unsigned int idx) {
-  if (sftp == NULL)
-    return NULL;
-  if (sftp->ext == NULL || sftp->ext->name == NULL) {
-    ssh_set_error_invalid(sftp->session);
-    return NULL;
-  }
+const char *sftp_extensions_get_data(sftp_session sftp, unsigned int idx)
+{
+    if (sftp == NULL) {
+        return NULL;
+    }
 
-  if (idx > sftp->ext->count) {
-    ssh_set_error_invalid(sftp->session);
-    return NULL;
-  }
+    if (sftp->ext == NULL || sftp->ext->name == NULL) {
+        ssh_set_error_invalid(sftp->session);
+        return NULL;
+    }
 
-  return sftp->ext->data[idx];
+    if (idx >= sftp->ext->count) {
+        ssh_set_error_invalid(sftp->session);
+        return NULL;
+    }
+
+    return sftp->ext->data[idx];
 }
 
 int

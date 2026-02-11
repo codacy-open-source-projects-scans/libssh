@@ -37,6 +37,7 @@
 #endif /* _WIN32 */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -499,7 +500,7 @@ ssh_get_hexa_internal(const unsigned char *what, size_t len, bool colons)
     size_t bytes_per_byte = 2 + (colons ? 1 : 0);
     size_t hlen = len * bytes_per_byte;
 
-    if (len > (UINT_MAX - 1) / bytes_per_byte) {
+    if (what == NULL || len < 1 || len > (UINT_MAX - 1) / bytes_per_byte) {
         return NULL;
     }
 
@@ -1263,6 +1264,7 @@ static char *get_connection_hash(ssh_session session)
     SHACTX ctx = sha1_init();
     char strport[10] = {0};
     unsigned int port;
+    char *username = NULL;
     int rc;
 
     if (session == NULL) {
@@ -1285,6 +1287,9 @@ static char *get_connection_hash(ssh_session session)
     SAFE_FREE(local_hostname);
 
     /* Remote hostname %h */
+    if (session->opts.host == NULL) {
+        goto err;
+    }
     rc = sha1_update(ctx, session->opts.host, strlen(session->opts.host));
     if (rc != SSH_OK) {
         goto err;
@@ -1299,9 +1304,18 @@ static char *get_connection_hash(ssh_session session)
     }
 
     /* The remote username %r */
-    rc = sha1_update(ctx,
-                     session->opts.username,
-                     strlen(session->opts.username));
+    username = session->opts.username;
+    if (username == NULL) {
+        /* fallback to local username: it will be used if not explicitly set */
+        username = ssh_get_local_username();
+        if (username == NULL) {
+            goto err;
+        }
+    }
+    rc = sha1_update(ctx, username, strlen(username));
+    if (username != session->opts.username) {
+        free(username);
+    }
     if (rc != SSH_OK) {
         goto err;
     }
@@ -2414,6 +2428,79 @@ ssh_libssh_proxy_jumps(void)
     const char *t = getenv("OPENSSH_PROXYJUMP");
 
     return !(t != NULL && t[0] == '1');
+}
+
+/**
+ * @internal
+ *
+ * @brief Safely open a file containing some configuration.
+ *
+ * Runs checks if the file can be used as some configuration file (is regular
+ * file and is not too large). If so, returns the opened file (for reading).
+ * Otherwise logs error and returns `NULL`.
+ *
+ * @param filename      The path to the file to open.
+ * @param max_file_size Maximum file size that is accepted.
+ *
+ * @returns the opened file or `NULL` on error.
+ */
+FILE *ssh_strict_fopen(const char *filename, size_t max_file_size)
+{
+    FILE *f = NULL;
+    struct stat sb;
+    char err_msg[SSH_ERRNO_MSG_MAX] = {0};
+    int r, fd;
+
+    /* open first to avoid TOCTOU */
+    fd = open(filename, O_RDONLY);
+    if (fd == -1) {
+        SSH_LOG(SSH_LOG_RARE,
+                "Failed to open a file %s for reading: %s",
+                filename,
+                ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
+        return NULL;
+    }
+
+    /* Check the file is sensible for a configuration file */
+    r = fstat(fd, &sb);
+    if (r != 0) {
+        SSH_LOG(SSH_LOG_RARE,
+                "Failed to stat %s: %s",
+                filename,
+                ssh_strerror(errno, err_msg, SSH_ERRNO_MSG_MAX));
+        close(fd);
+        return NULL;
+    }
+    if ((sb.st_mode & S_IFMT) != S_IFREG) {
+        SSH_LOG(SSH_LOG_RARE,
+                "The file %s is not a regular file: skipping",
+                filename);
+        close(fd);
+        return NULL;
+    }
+
+    if ((size_t)sb.st_size > max_file_size) {
+        SSH_LOG(SSH_LOG_RARE,
+                "The file %s is too large (%jd MB > %zu MB): skipping",
+                filename,
+                (intmax_t)sb.st_size / 1024 / 1024,
+                max_file_size / 1024 / 1024);
+        close(fd);
+        return NULL;
+    }
+
+    f = fdopen(fd, "r");
+    if (f == NULL) {
+        SSH_LOG(SSH_LOG_RARE,
+                "Failed to open a file %s for reading: %s",
+                filename,
+                ssh_strerror(r, err_msg, SSH_ERRNO_MSG_MAX));
+        close(fd);
+        return NULL;
+    }
+
+    /* the flcose() will close also the underlying fd */
+    return f;
 }
 
 /** @} */

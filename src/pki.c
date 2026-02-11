@@ -834,6 +834,10 @@ int ssh_key_is_private(const ssh_key k) {
 /**
  * @brief Compare keys if they are equal.
  *
+ * Note that comparing private keys is almost never needed. The private key
+ * is cryptographically bound to the public key and comparing public keys should
+ * always be preferred.
+ *
  * @param[in] k1        The first key to compare.
  *
  * @param[in] k2        The second key to compare.

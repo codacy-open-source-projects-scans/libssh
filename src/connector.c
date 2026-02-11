@@ -314,7 +314,7 @@ static void ssh_connector_reset_pollevents(ssh_connector connector)
  * This should be called after some data is successfully read from
  * connector's input and written to connector's output.
  *
- * @param[in, out] connector Connector for which the io operation occured.
+ * @param[in, out] connector Connector for which the io operation occurred.
  *
  * @warning This does not consider the case when the io indicated failure
  *
