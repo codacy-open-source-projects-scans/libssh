@@ -1397,7 +1397,7 @@ int ssh_userauth_publickey_auto(ssh_session session,
         return SSH_AUTH_ERROR;
     }
 
-    SSH_LOG(SSH_LOG_INFO,
+    SSH_LOG(SSH_LOG_DEBUG,
             "Starting authentication as a user %s",
             username ? username : session->opts.username);
 

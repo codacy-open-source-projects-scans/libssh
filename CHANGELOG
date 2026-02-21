@@ -2,6 +2,17 @@ CHANGELOG
 =========
 
 version 0.12.0 (released 2026-02-10)
+ * Security:
+   * CVE-2025-14821: libssh loads configuration files from the C:\etc directory
+     on Windows
+   * CVE-2026-0964: SCP Protocol Path Traversal in ssh_scp_pull_request()
+   * CVE-2026-0965: Possible Denial of Service when parsing unexpected
+     configuration files
+   * CVE-2026-0966: Buffer underflow in ssh_get_hexa() on invalid input
+   * CVE-2026-0967: Specially crafted patterns could cause DoS
+   * CVE-2026-0968: OOB Read in sftp_parse_longname()
+   * libssh-2026-sftp-extensions: Read buffer overrun when handling SFTP
+     extensions
  * Deprecations and removals:
    * Bumped minimal RSA key size to 1024 bits
  * New functionality:

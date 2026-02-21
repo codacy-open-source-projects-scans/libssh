@@ -36,6 +36,10 @@ if (WITH_PKCS11_URI)
         torture_auth_pkcs11)
 endif()
 
+if (TINYSSHD_EXECUTABLE AND NCAT_EXECUTABLE)
+    set(LIBSSH_CLIENT_TESTS ${LIBSSH_CLIENT_TESTS} torture_tinyssh)
+endif()
+
 if (HAVE_PTHREAD)
     set(LIBSSH_CLIENT_TESTS
         ${LIBSSH_CLIENT_TESTS}
@@ -91,6 +95,12 @@ foreach(_CLI_TEST ${LIBSSH_CLIENT_TESTS})
                     COMPILE_OPTIONS ${DEFAULT_C_COMPILE_FLAGS}
                     LINK_LIBRARIES ${TORTURE_LIBRARY} util
     )
+
+    if (_CLI_TEST STREQUAL "torture_tinyssh")
+        target_compile_definitions(${_CLI_TEST} PRIVATE 
+            TINYSSH_KEYS_DIR="${TINYSSH_KEY_DIR}"
+        )
+    endif()
 
     if (OSX)
         set_property(

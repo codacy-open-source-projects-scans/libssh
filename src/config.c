@@ -258,7 +258,9 @@ local_parse_file(ssh_session session,
 
     f = ssh_strict_fopen(filename, SSH_MAX_CONFIG_FILE_SIZE);
     if (f == NULL) {
-        /* The underlying function logs the reasons */
+        SSH_LOG(SSH_LOG_RARE,
+                "Failed to open included configuration file %s",
+                filename);
         return;
     }
 

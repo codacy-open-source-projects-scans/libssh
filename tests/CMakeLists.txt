@@ -259,6 +259,20 @@ else()
     set(PUTTYGEN_EXECUTABLE "/bin/puttygen-not-found")
 endif()
 
+find_program(TINYSSHD_EXECUTABLE
+             NAMES 
+                tinysshd
+             PATHS
+                /sbin 
+                /usr/sbin 
+                /usr/local/sbin)
+
+if (TINYSSHD_EXECUTABLE)
+    message(STATUS "Found TinySSH server: ${TINYSSHD_EXECUTABLE}")
+else()
+    message(STATUS "Could NOT find TinySSH server")
+endif()
+
 find_program(SSHD_EXECUTABLE
              NAME
                 sshd
@@ -390,6 +404,14 @@ if (CLIENT_TESTING OR SERVER_TESTING)
     file(COPY keys/id_ecdsa_sk.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ed25519_sk DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
     file(COPY keys/id_ed25519_sk.pub DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/home/bob/.ssh/ FILE_PERMISSIONS OWNER_READ OWNER_WRITE)
+
+    # TINYSSH Key Setup
+    set(TINYSSH_KEY_DIR "${CMAKE_CURRENT_BINARY_DIR}/etc/tinyssh")
+    file(MAKE_DIRECTORY ${TINYSSH_KEY_DIR})
+
+    # Copy the TINYSSH hostkeys
+    file(COPY keys/ed25519.pk DESTINATION ${TINYSSH_KEY_DIR})
+    file(COPY keys/.ed25519.sk DESTINATION ${TINYSSH_KEY_DIR})
 
     # Allow to auth with bob's public keys on alice and doe account
     configure_file(keys/id_rsa.pub ${CMAKE_CURRENT_BINARY_DIR}/home/alice/.ssh/authorized_keys @ONLY)

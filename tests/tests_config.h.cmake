@@ -86,3 +86,7 @@
 #cmakedefine PKCS11SPY "${PKCS11SPY}"
 #cmakedefine HAVE_SK_DUMMY 1
 #cmakedefine SK_DUMMY_LIBRARY_PATH "${SK_DUMMY_LIBRARY_PATH}"
+
+/* TinySSH Executable */
+
+#cmakedefine TINYSSHD_EXECUTABLE "${TINYSSHD_EXECUTABLE}"

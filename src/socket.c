@@ -1435,7 +1435,7 @@ ssh_socket_connect_proxyjump(ssh_socket s)
 
     session = s->session;
 
-    SSH_LOG(SSH_LOG_INFO,
+    SSH_LOG(SSH_LOG_DEBUG,
             "Connecting to host %s port %d user %s through ProxyJump",
             session->opts.host,
             session->opts.port,
@@ -1515,7 +1515,7 @@ ssh_socket_connect_proxyjump(ssh_socket s)
     /* transferred to the jump_thread_data */
     jump_session = NULL;
 
-    SSH_LOG(SSH_LOG_INFO,
+    SSH_LOG(SSH_LOG_DEBUG,
             "Starting proxy thread to host %s port %d user %s, callbacks=%p",
             jump_thread_data->next_jump->hostname,
             jump_thread_data->next_jump->port,
