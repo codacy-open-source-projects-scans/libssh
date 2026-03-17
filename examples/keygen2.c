@@ -35,7 +35,7 @@
 
 struct arguments_st {
     enum ssh_keytypes_e type;
-    unsigned long bits;
+    int bits;
     char *file;
     char *passphrase;
     char *format;
@@ -321,8 +321,9 @@ list_fingerprint(char *file)
 
 int main(int argc, char *argv[])
 {
+    ssh_pki_ctx ctx = NULL;
     ssh_key key = NULL;
-    int rc = 0;
+    int ret = EXIT_FAILURE, rc, fd;
     char overwrite[1024] = "";
 
     char *pubkey_file = NULL;
@@ -361,15 +362,15 @@ int main(int argc, char *argv[])
     }
 
     errno = 0;
-    rc = open(arguments.file, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
-    if (rc < 0) {
+    fd = open(arguments.file, O_CREAT | O_EXCL | O_WRONLY, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
         if (errno == EEXIST) {
             printf("File \"%s\" exists. Overwrite it? (y|n) ", arguments.file);
             rc = scanf("%1023s", overwrite);
             if (rc > 0 && tolower(overwrite[0]) == 'y') {
-                rc = open(arguments.file, O_WRONLY);
-                if (rc > 0) {
-                    close(rc);
+                fd = open(arguments.file, O_WRONLY);
+                if (fd > 0) {
+                    close(fd);
                     errno = 0;
                     rc = chmod(arguments.file, S_IRUSR | S_IWUSR);
                     if (rc != 0) {
@@ -391,13 +392,30 @@ int main(int argc, char *argv[])
             goto end;
         }
     } else {
-        close(rc);
+        close(fd);
+    }
+
+    /* Create a new PKI Context if needed -- for other types using NULL is ok */
+    if (arguments.type == SSH_KEYTYPE_RSA && arguments.bits != 0) {
+        ctx = ssh_pki_ctx_new();
+        if (ctx == NULL) {
+            fprintf(stderr, "Error: Failed to allocate PKI context\n");
+            goto end;
+        }
+
+        rc = ssh_pki_ctx_options_set(ctx,
+                                     SSH_PKI_OPTION_RSA_KEY_SIZE,
+                                     &arguments.bits);
+        if (rc != SSH_OK) {
+            fprintf(stderr, "Error: Failed to set RSA bit size\n");
+            goto end;
+        }
     }
 
     /* Generate a new private key */
-    rc = ssh_pki_generate(arguments.type, arguments.bits, &key);
+    rc = ssh_pki_generate_key(arguments.type, ctx, &key);
     if (rc != SSH_OK) {
-        fprintf(stderr, "Error: Failed to generate keys");
+        fprintf(stderr, "Error: Failed to generate keys\n");
         goto end;
     }
 
@@ -451,24 +469,23 @@ int main(int argc, char *argv[])
 
     pubkey_file = (char *)malloc(strlen(arguments.file) + 5);
     if (pubkey_file == NULL) {
-        rc = ENOMEM;
         goto end;
     }
 
     sprintf(pubkey_file, "%s.pub", arguments.file);
 
     errno = 0;
-    rc = open(pubkey_file,
+    fd = open(pubkey_file,
               O_CREAT | O_EXCL | O_WRONLY,
               S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (rc < 0) {
+    if (fd < 0) {
         if (errno == EEXIST) {
             printf("File \"%s\" exists. Overwrite it? (y|n) ", pubkey_file);
             rc = scanf("%1023s", overwrite);
             if (rc > 0 && tolower(overwrite[0]) == 'y') {
-                rc = open(pubkey_file, O_WRONLY);
-                if (rc > 0) {
-                    close(rc);
+                fd = open(pubkey_file, O_WRONLY);
+                if (fd > 0) {
+                    close(fd);
                     errno = 0;
                     rc = chmod(pubkey_file,
                                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -491,7 +508,7 @@ int main(int argc, char *argv[])
             goto end;
         }
     } else {
-        close(rc);
+        close(fd);
     }
 
     /* Write the public key */
@@ -501,14 +518,12 @@ int main(int argc, char *argv[])
         goto end;
     }
 
-end:
-    if (key != NULL) {
-        ssh_key_free(key);
-    }
+    ret = EXIT_SUCCESS;
 
-    if (arguments.file != NULL) {
-        free(arguments.file);
-    }
+end:
+    ssh_pki_ctx_free(ctx);
+    ssh_key_free(key);
+    free(arguments.file);
 
     if (arguments.passphrase != NULL) {
 #ifdef HAVE_EXPLICIT_BZERO
@@ -519,8 +534,6 @@ end:
         free(arguments.passphrase);
     }
 
-    if (pubkey_file != NULL) {
-        free(pubkey_file);
-    }
-    return rc;
+    free(pubkey_file);
+    return ret;
 }
