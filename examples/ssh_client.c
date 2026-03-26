@@ -5,22 +5,24 @@
  *
  * This file is part of the SSH Library
  *
- * You are free to copy this file, modify it in any way, consider it being public
- * domain. This does not apply to the rest of the library though, but it is
- * allowed to cut-and-paste working code from this file to any license of
+ * You are free to copy this file, modify it in any way, consider it being
+ * public domain. This does not apply to the rest of the library though, but it
+ * is allowed to cut-and-paste working code from this file to any license of
  * program.
  * The goal is to show the API in action. It's not a reference on how terminal
  * clients must be made or how a client should react.
  */
 
 #include "config.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 
 #include <sys/select.h>
 #include <sys/time.h>
+
+#include <time.h>
 
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
@@ -32,10 +34,10 @@
 #include <pty.h>
 #endif
 
-#include <sys/ioctl.h>
-#include <signal.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/ioctl.h>
 
 #include <libssh/callbacks.h>
 #include <libssh/libssh.h>
@@ -48,20 +50,23 @@ static char *user = NULL;
 static char *cmds[MAXCMD];
 static char *config_file = NULL;
 static struct termios terminal;
+static char *log_file_path = NULL;
+static FILE *log_fp = NULL;
 
 static char *pcap_file = NULL;
 
 static char *proxycommand = NULL;
 
-static int auth_callback(const char *prompt,
-                         char *buf,
-                         size_t len,
-                         int echo,
-                         int verify,
-                         void *userdata)
+static int
+auth_callback(const char *prompt,
+              char *buf,
+              size_t len,
+              int echo,
+              int verify,
+              void *userdata)
 {
-    (void) verify;
-    (void) userdata;
+    (void)verify;
+    (void)userdata;
 
     return ssh_getpass(prompt, buf, len, echo, verify);
 }
@@ -71,11 +76,13 @@ struct ssh_callbacks_struct cb = {
     .userdata = NULL,
 };
 
-static void add_cmd(char *cmd)
+static void
+add_cmd(char *cmd)
 {
     int n;
 
-    for (n = 0; (n < MAXCMD) && cmds[n] != NULL; n++);
+    for (n = 0; (n < MAXCMD) && cmds[n] != NULL; n++)
+        ;
 
     if (n == MAXCMD) {
         return;
@@ -84,7 +91,83 @@ static void add_cmd(char *cmd)
     cmds[n] = cmd;
 }
 
-static void usage(void)
+/**
+ * @brief Logging callback function that writes logs.
+ *
+ * Log messages are formatted with timestamps. It writes outputs
+ * to the file stream specified in the userdata parameter.
+ *
+ * @param priority      Priority of the log, the smaller being
+ * the more important.
+ *
+ * @param function      The function name calling the logging functions.
+ *
+ * @param buffer        The actual message
+ *
+ * @param userdata      Userdata to be passed to the callback function;
+ * if not NULL, treated as a FILE* stream for output;
+ * if NULL, output is directed to stderr
+ *
+ * @return void
+ *
+ * @note The function is thread-safe. If the current time cannot be retrieved,
+ * a fallback format without timestamp is used.
+ * The output stream is flushed after each message.
+ */
+static void
+logging_callback(int priority,
+                 const char *function,
+                 const char *buffer,
+                 void *userdata)
+{
+    FILE *fp = NULL;
+    struct timeval tv;
+    struct tm tm;
+    struct tm *tm_ptr = NULL;
+    char time_buffer[64];
+    time_t t;
+
+    (void)function;
+
+    if (userdata != NULL) {
+        fp = (FILE *)userdata;
+    } else {
+        fp = stderr;
+    }
+
+    gettimeofday(&tv, NULL);
+    t = (time_t)tv.tv_sec;
+
+#ifdef _WIN32
+    if (localtime_s(&tm, &t) != 0) {
+        tm_ptr = NULL;
+    } else {
+        tm_ptr = &tm;
+    }
+#else
+    tm_ptr = localtime_r(&t, &tm);
+#endif
+
+    if (tm_ptr == NULL) {
+        fprintf(fp,
+                "[Priority level %d]:  %s\n",
+                priority,
+                buffer);
+    } else {
+        strftime(time_buffer, sizeof(time_buffer), "%Y/%m/%d %H:%M:%S", &tm);
+
+        fprintf(fp,
+                "[%s, %d]:  %s\n",
+                time_buffer,
+                priority,
+                buffer);
+    }
+
+    fflush(fp);
+}
+
+static void
+usage(void)
 {
     fprintf(
         stderr,
@@ -96,6 +179,7 @@ static void usage(void)
         "  -o option : set configuration option (e.g., -o Compression=yes)\n"
         "  -r : use RSA to verify host public key\n"
         "  -F file : parse configuration file instead of default one\n"
+        "  -E file : append debug logs to a log file instead of stderr\n"
 #ifdef WITH_PCAP
         "  -P file : create a pcap debugging file\n"
 #endif
@@ -108,17 +192,21 @@ static void usage(void)
     exit(0);
 }
 
-static int opts(int argc, char **argv)
+static int
+opts(int argc, char **argv)
 {
     int i;
 
-    while ((i = getopt(argc, argv, "T:P:F:")) != -1) {
+    while ((i = getopt(argc, argv, "E:T:P:F:")) != -1) {
         switch (i) {
         case 'P':
             pcap_file = optarg;
             break;
         case 'F':
             config_file = optarg;
+            break;
+        case 'E':
+            log_file_path = optarg;
             break;
 #ifndef _WIN32
         case 'T':
@@ -134,7 +222,7 @@ static int opts(int argc, char **argv)
         host = argv[optind++];
     }
 
-    while(optind < argc) {
+    while (optind < argc) {
         add_cmd(argv[optind++]);
     }
 
@@ -146,25 +234,28 @@ static int opts(int argc, char **argv)
 }
 
 #ifndef HAVE_CFMAKERAW
-static void cfmakeraw(struct termios *termios_p)
+static void
+cfmakeraw(struct termios *termios_p)
 {
-    termios_p->c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON);
+    termios_p->c_iflag &=
+        ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
     termios_p->c_oflag &= ~OPOST;
-    termios_p->c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
-    termios_p->c_cflag &= ~(CSIZE|PARENB);
+    termios_p->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    termios_p->c_cflag &= ~(CSIZE | PARENB);
     termios_p->c_cflag |= CS8;
 }
 #endif
 
-
-static void do_cleanup(int i)
+static void
+do_cleanup(int i)
 {
     (void)i;
 
     tcsetattr(0, TCSANOW, &terminal);
 }
 
-static void do_exit(int i)
+static void
+do_exit(int i)
 {
     (void)i;
 
@@ -175,14 +266,16 @@ static void do_exit(int i)
 static int signal_delayed = 0;
 
 #ifdef SIGWINCH
-static void sigwindowchanged(int i)
+static void
+sigwindowchanged(int i)
 {
     (void)i;
     signal_delayed = 1;
 }
 #endif
 
-static void setsignal(void)
+static void
+setsignal(void)
 {
 #ifdef SIGWINCH
     signal(SIGWINCH, sigwindowchanged);
@@ -190,18 +283,20 @@ static void setsignal(void)
     signal_delayed = 0;
 }
 
-static void sizechanged(ssh_channel chan)
+static void
+sizechanged(ssh_channel chan)
 {
     struct winsize win = {
         .ws_row = 0,
     };
 
     ioctl(1, TIOCGWINSZ, &win);
-    ssh_channel_change_pty_size(chan,win.ws_col, win.ws_row);
+    ssh_channel_change_pty_size(chan, win.ws_col, win.ws_row);
     setsignal();
 }
 
-static void select_loop(ssh_session session,ssh_channel channel)
+static void
+select_loop(ssh_session session, ssh_channel channel)
 {
     ssh_connector connector_in, connector_out, connector_err;
     int rc;
@@ -210,14 +305,18 @@ static void select_loop(ssh_session session,ssh_channel channel)
 
     /* stdin */
     connector_in = ssh_connector_new(session);
-    ssh_connector_set_out_channel(connector_in, channel, SSH_CONNECTOR_STDINOUT);
+    ssh_connector_set_out_channel(connector_in,
+                                  channel,
+                                  SSH_CONNECTOR_STDINOUT);
     ssh_connector_set_in_fd(connector_in, STDIN_FILENO);
     ssh_event_add_connector(event, connector_in);
 
     /* stdout */
     connector_out = ssh_connector_new(session);
     ssh_connector_set_out_fd(connector_out, STDOUT_FILENO);
-    ssh_connector_set_in_channel(connector_out, channel, SSH_CONNECTOR_STDINOUT);
+    ssh_connector_set_in_channel(connector_out,
+                                 channel,
+                                 SSH_CONNECTOR_STDINOUT);
     ssh_event_add_connector(event, connector_out);
 
     /* stderr */
@@ -247,7 +346,8 @@ static void select_loop(ssh_session session,ssh_channel channel)
     ssh_event_free(event);
 }
 
-static void shell(ssh_session session)
+static void
+shell(ssh_session session)
 {
     ssh_channel channel = NULL;
     struct termios terminal_local;
@@ -292,7 +392,8 @@ static void shell(ssh_session session)
     ssh_channel_free(channel);
 }
 
-static void batch_shell(ssh_session session)
+static void
+batch_shell(ssh_session session)
 {
     ssh_channel channel;
     char *buffer = NULL;
@@ -334,12 +435,26 @@ static void batch_shell(ssh_session session)
     ssh_channel_free(channel);
 }
 
-static int client(ssh_session session)
+static int
+client(ssh_session session)
 {
     int auth = 0;
     int authenticated = 0;
     char *banner = NULL;
     int state;
+
+    if (log_file_path != NULL) {
+        log_fp = fopen(log_file_path, "a");
+        if (log_fp == NULL) {
+            fprintf(stderr,
+                    "Error: Cannot open %s for logging\n",
+                    log_file_path);
+            return -1;
+        }
+
+        ssh_set_log_callback(logging_callback);
+        ssh_set_log_userdata(log_fp);
+    }
 
     if (user) {
         if (ssh_options_set(session, SSH_OPTIONS_USER, user) < 0) {
@@ -402,7 +517,8 @@ static int client(ssh_session session)
 }
 
 static ssh_pcap_file pcap;
-static void set_pcap(ssh_session session)
+static void
+set_pcap(ssh_session session)
 {
     if (pcap_file == NULL) {
         return;
@@ -422,7 +538,8 @@ static void set_pcap(ssh_session session)
     ssh_set_pcap_file(session, pcap);
 }
 
-static void cleanup_pcap(void)
+static void
+cleanup_pcap(void)
 {
     if (pcap != NULL) {
         ssh_pcap_file_free(pcap);
@@ -430,7 +547,22 @@ static void cleanup_pcap(void)
     pcap = NULL;
 }
 
-int main(int argc, char **argv)
+static void
+close_logfp(void)
+{
+    void *userdata = NULL;
+    userdata = ssh_get_log_userdata();
+
+    if (userdata != NULL) {
+        FILE *logfp = (FILE *)userdata;
+
+        ssh_set_log_userdata(NULL);
+        fclose(logfp);
+    }
+}
+
+int
+main(int argc, char **argv)
 {
     ssh_session session = NULL;
 
@@ -438,7 +570,7 @@ int main(int argc, char **argv)
     session = ssh_new();
 
     ssh_callbacks_init(&cb);
-    ssh_set_callbacks(session,&cb);
+    ssh_set_callbacks(session, &cb);
 
     if (ssh_options_getopt(session, &argc, argv) || opts(argc, argv)) {
         fprintf(stderr,
@@ -455,7 +587,9 @@ int main(int argc, char **argv)
 
     ssh_disconnect(session);
     ssh_free(session);
+
     cleanup_pcap();
+    close_logfp();
 
     ssh_finalize();
 
