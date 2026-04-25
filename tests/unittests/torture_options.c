@@ -231,6 +231,13 @@ static void torture_options_set_host(void **state) {
     assert_non_null(session->opts.originalhost);
     assert_string_equal(session->opts.originalhost, "customer_1");
     assert_null(session->opts.username);
+
+    /* Implicit hostname lowercasing */
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "UPPERCASE-HOST");
+    assert_return_code(rc, errno);
+    rc = ssh_options_apply(session);
+    assert_return_code(rc, errno);
+    assert_string_equal(session->opts.host, "uppercase-host");
 }
 
 static void torture_options_set_ciphers(void **state)
@@ -370,47 +377,40 @@ static void torture_options_get_key_exchange(void **state)
     ssh_session session = *state;
     int rc;
     char *value = NULL;
+    const char *exp_value = NULL;
 
     /* Test defaults returned */
     rc = ssh_options_get(session, SSH_OPTIONS_KEY_EXCHANGE, &value);
     assert_ssh_return_code(session, rc);
     assert_non_null(value);
     if (ssh_fips_mode()) {
-        assert_string_equal(value,
-                            "ecdh-sha2-nistp256,"
-                            "ecdh-sha2-nistp384,"
-                            "ecdh-sha2-nistp521,"
-                            "diffie-hellman-group-exchange-sha256,"
-                            "diffie-hellman-group14-sha256,"
-                            "diffie-hellman-group16-sha512,"
-                            "diffie-hellman-group18-sha512");
-    } else {
+        exp_value = "mlkem768nistp256-sha256,"
 #ifdef HAVE_MLKEM1024
-        assert_string_equal(value,
-                            "mlkem768x25519-sha256,"
-                            "mlkem768nistp256-sha256,"
-                            "mlkem1024nistp384-sha384,"
-                            "sntrup761x25519-sha512,sntrup761x25519-sha512@openssh.com,"
-                            "curve25519-sha256,curve25519-sha256@libssh.org,"
-                            "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
-                            "ecdh-sha2-nistp521,diffie-hellman-group18-sha512,"
-                            "diffie-hellman-group16-sha512,"
-                            "diffie-hellman-group-exchange-sha256,"
-                            "diffie-hellman-group14-sha256");
-#else
-        assert_string_equal(value,
-                            "mlkem768x25519-sha256,"
-                            "mlkem768nistp256-sha256,"
-                            "sntrup761x25519-sha512,"
-                            "sntrup761x25519-sha512@openssh.com,"
-                            "curve25519-sha256,curve25519-sha256@libssh.org,"
-                            "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
-                            "ecdh-sha2-nistp521,diffie-hellman-group18-sha512,"
-                            "diffie-hellman-group16-sha512,"
-                            "diffie-hellman-group-exchange-sha256,"
-                            "diffie-hellman-group14-sha256");
+                    "mlkem1024nistp384-sha384,"
 #endif
+                    "ecdh-sha2-nistp256,"
+                    "ecdh-sha2-nistp384,"
+                    "ecdh-sha2-nistp521,"
+                    "diffie-hellman-group-exchange-sha256,"
+                    "diffie-hellman-group14-sha256,"
+                    "diffie-hellman-group16-sha512,"
+                    "diffie-hellman-group18-sha512";
+    } else {
+        exp_value = "mlkem768x25519-sha256,"
+                    "mlkem768nistp256-sha256,"
+#ifdef HAVE_MLKEM1024
+                    "mlkem1024nistp384-sha384,"
+#endif
+                    "sntrup761x25519-sha512,"
+                    "sntrup761x25519-sha512@openssh.com,"
+                    "curve25519-sha256,curve25519-sha256@libssh.org,"
+                    "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
+                    "ecdh-sha2-nistp521,diffie-hellman-group18-sha512,"
+                    "diffie-hellman-group16-sha512,"
+                    "diffie-hellman-group-exchange-sha256,"
+                    "diffie-hellman-group14-sha256";
     }
+    assert_string_equal(value, exp_value);
     ssh_string_free_char(value);
 
     /* Test explicit kexes */
@@ -2652,6 +2652,263 @@ static void torture_options_set_verbosity (void **state)
     assert_int_not_equal(new_level, 0);
 }
 
+static void torture_options_set_batch_mode(void **state)
+{
+    ssh_session session = *state;
+    bool val;
+    int rc;
+
+    /* Default value after setup() should be false */
+    assert_false(session->opts.batch_mode);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Batch mode will be disabled */
+    val = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &val);
+    assert_ssh_return_code(session, rc);
+    assert_false(session->opts.batch_mode);
+
+    /* Batch mode will be enabled */
+    val = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &val);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.batch_mode);
+}
+
+static void torture_options_get_int(void **state)
+{
+    ssh_session session = *state;
+    bool bval;
+    int ival;
+    int result;
+    int rc;
+
+    /* NULL session must be rejected */
+    rc = ssh_options_get_int(NULL, SSH_OPTIONS_BATCH_MODE, &result);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* NULL output pointer must be rejected */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, NULL);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* Unsupported option type must be rejected */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_HOST, &result);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* SSH_OPTIONS_ADDRESS_FAMILY default should be ANY */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ADDRESS_FAMILY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_ADDRESS_FAMILY_ANY);
+
+    /* After setting to INET, getter should return INET */
+    ival = SSH_ADDRESS_FAMILY_INET;
+    rc = ssh_options_set(session, SSH_OPTIONS_ADDRESS_FAMILY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ADDRESS_FAMILY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_ADDRESS_FAMILY_INET);
+
+    /* After setting back to ANY, getter should return ANY */
+    ival = SSH_ADDRESS_FAMILY_ANY;
+    rc = ssh_options_set(session, SSH_OPTIONS_ADDRESS_FAMILY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ADDRESS_FAMILY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_ADDRESS_FAMILY_ANY);
+
+    /* SSH_OPTIONS_CONTROL_MASTER: default should be SSH_CONTROL_MASTER_NO */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_CONTROL_MASTER, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_CONTROL_MASTER_NO);
+
+    /* After setting to AUTO, getter should return AUTO */
+    ival = SSH_CONTROL_MASTER_AUTO;
+    rc = ssh_options_set(session, SSH_OPTIONS_CONTROL_MASTER, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_CONTROL_MASTER, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_CONTROL_MASTER_AUTO);
+
+    /* SSH_OPTIONS_IDENTITIES_ONLY : default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_IDENTITIES_ONLY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    bval = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_IDENTITIES_ONLY, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_IDENTITIES_ONLY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* SSH_OPTIONS_LOG_VERBOSITY: default should be SSH_LOG_NOLOG */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_LOG_VERBOSITY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_LOG_NOLOG);
+
+    /* After setting to WARNING, getter should return WARNING */
+    ival = SSH_LOG_WARNING;
+    rc = ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_LOG_VERBOSITY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_LOG_WARNING);
+
+    /* SSH_OPTIONS_STRICTHOSTKEYCHECK: default should be 1 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_NODELAY: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_NODELAY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    ival = 1;
+    rc = ssh_options_set(session, SSH_OPTIONS_NODELAY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_NODELAY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* SSH_OPTIONS_RSA_MIN_SIZE: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_RSA_MIN_SIZE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After setting to RSA_MIN_KEY_SIZE, getter will return RSA_MIN_KEY_SIZE */
+    ival = RSA_MIN_KEY_SIZE;
+    rc = ssh_options_set(session, SSH_OPTIONS_RSA_MIN_SIZE, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_RSA_MIN_SIZE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, RSA_MIN_KEY_SIZE);
+
+    /* SSH_OPTIONS_PASSWORD_AUTH : enabled by default */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PASSWORD_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling password auth, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_PASSWORD_AUTH, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PASSWORD_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After re-enabling password auth, getter should return 1 */
+    ival = 1;
+    rc = ssh_options_set(session, SSH_OPTIONS_PASSWORD_AUTH, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PASSWORD_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* SSH_OPTIONS_PUBKEY_AUTH (bitmask field): enabled by default */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PUBKEY_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling pubkey auth, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_PUBKEY_AUTH, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PUBKEY_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_KBDINT_AUTH : enabled by default */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_KBDINT_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling kbdint auth, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_KBDINT_AUTH, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_KBDINT_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_GSSAPI_AUTH : enabled by default */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GSSAPI_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling gssapi auth, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_GSSAPI_AUTH, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GSSAPI_AUTH, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    ival = 1;
+    rc = ssh_options_set(session, SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS,
+                         &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* SSH_OPTIONS_BATCH_MODE default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling batch mode, getter should return 1 */
+    bval = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling batch mode, getter should return 0 */
+    bval = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_PORT: default should return 22 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PORT, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 22);
+
+    /* After setting port to 2222, getter should return 2222 */
+    ival = 2222;
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PORT, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 2222);
+
+}
+
 static void torture_options_set_rsa_min_size(void **state)
 {
     ssh_session session = *state;
@@ -3738,6 +3995,12 @@ torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_auth_flags,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_batch_mode,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_get_int,
                                         setup,
                                         teardown),
     };

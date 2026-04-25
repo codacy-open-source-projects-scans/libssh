@@ -1282,6 +1282,153 @@ static void torture_ssh_get_hexa(void **state)
     ssh_string_free_char(hex);
 }
 
+static void torture_strlcpy(void **state)
+{
+    char dest[16];
+    size_t len;
+
+    (void)state;
+
+    /* Test basic copy */
+    len = strlcpy(dest, "hello", sizeof(dest));
+    assert_int_equal(len, 5);
+    assert_string_equal(dest, "hello");
+
+    /* Test truncation */
+    len = strlcpy(dest, "this is a very long string", sizeof(dest));
+    assert_int_equal(len, 26);          /* Returns source length, not copied */
+    assert_int_equal(strlen(dest), 15); /* Truncated to fit */
+
+    /* Test empty string */
+    len = strlcpy(dest, "", sizeof(dest));
+    assert_int_equal(len, 0);
+    assert_string_equal(dest, "");
+
+    /* Test size 0 - should not modify dest */
+    memset(dest, 'x', sizeof(dest));
+    len = strlcpy(dest, "test", 0);
+    assert_int_equal(len, 4);
+    assert_int_equal(dest[0], 'x'); /* Unchanged */
+}
+
+static void torture_strlcat(void **state)
+{
+    char dest[32];
+    size_t len;
+
+    (void)state;
+
+    /* Test basic concatenation */
+    strlcpy(dest, "hello", sizeof(dest));
+    len = strlcat(dest, " world", sizeof(dest));
+    assert_int_equal(len, 11);
+    assert_string_equal(dest, "hello world");
+
+    /* Test concatenation to full buffer */
+    strlcpy(dest, "123456789012345678901234567890", sizeof(dest));
+    len = strlcat(dest, "x", sizeof(dest));
+    assert_int_equal(
+        len,
+        31); /* 30 + 1 = 31, buffer already full so nothing appended */
+
+    /* Test concatenation when dest is already full */
+    memset(dest, 'x', sizeof(dest) - 1);
+    dest[sizeof(dest) - 1] = '\0';
+    len = strlcat(dest, "test", sizeof(dest));
+    assert_int_equal(len, 35);          /* 31 + 4 */
+    assert_int_equal(strlen(dest), 31); /* Unchanged */
+
+    /* Test empty append */
+    strlcpy(dest, "test", sizeof(dest));
+    len = strlcat(dest, "", sizeof(dest));
+    assert_int_equal(len, 4);
+    assert_string_equal(dest, "test");
+}
+
+static void torture_ssh_normalize_loose_ip(UNUSED_PARAM(void **state))
+{
+    char *result = NULL;
+    int rc;
+
+    /* NULL args should return -1 (error) */
+    rc = ssh_normalize_loose_ip(NULL, &result);
+    assert_int_equal(rc, -1);
+    assert_null(result);
+
+    rc = ssh_normalize_loose_ip("127.0.0.1", NULL);
+    assert_int_equal(rc, -1);
+
+    /* Loose IPv4 forms — should normalize to dotted-quad (rc=0) */
+    result = NULL;
+    rc = ssh_normalize_loose_ip("0", &result);
+    assert_int_equal(rc, 0);
+    assert_non_null(result);
+    assert_string_equal(result, "0.0.0.0");
+    SAFE_FREE(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("127.1", &result);
+    assert_int_equal(rc, 0);
+    assert_non_null(result);
+    assert_string_equal(result, "127.0.0.1");
+    SAFE_FREE(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("10.0.1", &result);
+    assert_int_equal(rc, 0);
+    assert_non_null(result);
+    assert_string_equal(result, "10.0.0.1");
+    SAFE_FREE(result);
+
+    /*
+     * The broadcast address "255.255.255.255" is a special case on Windows
+     * (INADDR_NONE), but on POSIX inet_aton() accepts it and ssh_is_ipaddr()
+     * already recognises it as a strict address, so it returns rc=1.
+     */
+    result = NULL;
+    rc = ssh_normalize_loose_ip("255.255.255.255", &result);
+    assert_int_equal(rc, 1); /* already a strict IPv4 */
+    assert_null(result);
+
+    /* Strict dotted-quad — already a valid IP, not "loose" (rc=1) */
+    result = NULL;
+    rc = ssh_normalize_loose_ip("127.0.0.1", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("192.168.10.20", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    /* IPv6 addresses — not loose IPv4 (rc=1) */
+    result = NULL;
+    rc = ssh_normalize_loose_ip("::1", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("2001:db8::1", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    /* Hostnames and garbage — not an IP at all (rc=1) */
+    result = NULL;
+    rc = ssh_normalize_loose_ip("example.com", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("not-an-ip", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+
+    result = NULL;
+    rc = ssh_normalize_loose_ip("", &result);
+    assert_int_equal(rc, 1);
+    assert_null(result);
+}
+
 int torture_run_tests(void) {
     int rc;
     struct CMUnitTest tests[] = {
@@ -1319,6 +1466,9 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_ssh_check_username_syntax),
         cmocka_unit_test(torture_ssh_is_ipaddr),
         cmocka_unit_test(torture_ssh_get_hexa),
+        cmocka_unit_test(torture_strlcpy),
+        cmocka_unit_test(torture_strlcat),
+        cmocka_unit_test(torture_ssh_normalize_loose_ip),
     };
 
     ssh_init();

@@ -47,6 +47,7 @@ extern LIBSSH_THREAD int ssh_log_level;
 #define LIBSSH_TESTCONFIG16 "libssh_testconfig16.tmp"
 #define LIBSSH_TESTCONFIG17 "libssh_testconfig17.tmp"
 #define LIBSSH_TESTCONFIG18 "libssh_testconfig18.tmp"
+#define LIBSSH_TESTCONFIG19 "libssh_testconfig19.tmp"
 #define LIBSSH_TESTCONFIGGLOB "libssh_testc*[36].tmp"
 #define LIBSSH_TEST_PUBKEYTYPES "libssh_test_PubkeyAcceptedKeyTypes.tmp"
 #define LIBSSH_TEST_PUBKEYALGORITHMS "libssh_test_PubkeyAcceptedAlgorithms.tmp"
@@ -182,6 +183,8 @@ extern LIBSSH_THREAD int ssh_log_level;
     "\tRekeyLimit 31M\n" \
     "Host data3\n" \
     "\tRekeyLimit 521K\n" \
+    "Host data4\n" \
+    "\tRekeyLimit 5k*n\n" \
     "Host time1\n" \
     "\tRekeyLimit default 3D\n" \
     "Host time2\n" \
@@ -236,6 +239,12 @@ extern LIBSSH_THREAD int ssh_log_level;
     "\tAddressFamily inet\n"       \
     "Host af6\n"                   \
     "\tAddressFamily inet6\n"
+
+#define LIBSSH_TESTCONFIG_STRING19 \
+    "Host nobatch\n"               \
+    "\tBatchMode no\n"             \
+    "Host batch\n"                 \
+    "\tBatchMode yes\n"
 
 #define LIBSSH_TEST_PUBKEYTYPES_STRING \
     "PubkeyAcceptedKeyTypes "PUBKEYACCEPTEDTYPES"\n"
@@ -326,6 +335,7 @@ static int setup_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG16);
     unlink(LIBSSH_TESTCONFIG17);
     unlink(LIBSSH_TESTCONFIG18);
+    unlink(LIBSSH_TESTCONFIG19);
     unlink(LIBSSH_TEST_PUBKEYTYPES);
     unlink(LIBSSH_TEST_PUBKEYALGORITHMS);
     unlink(LIBSSH_TEST_NONEWLINEEND);
@@ -388,6 +398,10 @@ static int setup_config_files(void **state)
     torture_write_file(LIBSSH_TESTCONFIG18,
                        LIBSSH_TESTCONFIG_STRING18);
 
+    /* BatchMode */
+    torture_write_file(LIBSSH_TESTCONFIG19,
+                       LIBSSH_TESTCONFIG_STRING19);
+
     torture_write_file(LIBSSH_TEST_PUBKEYTYPES,
                        LIBSSH_TEST_PUBKEYTYPES_STRING);
 
@@ -432,6 +446,7 @@ static int teardown_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG16);
     unlink(LIBSSH_TESTCONFIG17);
     unlink(LIBSSH_TESTCONFIG18);
+    unlink(LIBSSH_TESTCONFIG19);
     unlink(LIBSSH_TEST_PUBKEYTYPES);
     unlink(LIBSSH_TEST_PUBKEYALGORITHMS);
     unlink(LIBSSH_TEST_NONEWLINEEND);
@@ -864,13 +879,13 @@ static void torture_config_match(void **state,
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "example1");
     _parse_config(session, file, string, SSH_OK);
-    assert_string_equal(session->opts.host, "exampleN");
+    assert_string_equal(session->opts.host, "examplen");
     assert_string_equal(session->opts.originalhost, "example1");
 
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "example2");
     _parse_config(session, file, string, SSH_OK);
-    assert_string_equal(session->opts.host, "exampleN");
+    assert_string_equal(session->opts.host, "examplen");
     assert_string_equal(session->opts.originalhost, "example2");
 
     /* We can match by originalhost */
@@ -1939,6 +1954,51 @@ static void torture_config_control_master_file(void **state)
 }
 
 /**
+ * @brief Verify we can parse BatchMode configuration option
+ */
+static void torture_config_batch_mode(void **state,
+                                      const char *file,
+                                      const char *string)
+{
+    ssh_session session = *state;
+
+    int batch_mode = -1;
+    int rc;
+
+    /* BatchMode no: batch_mode should be 0 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "nobatch");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, &batch_mode);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(batch_mode, 0);
+
+    /* BatchMode yes: batch_mode should be 1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "batch");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_BATCH_MODE, &batch_mode);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(batch_mode, 1);
+}
+
+/**
+ * @brief Verify we can parse BatchMode configuration option from string
+ */
+static void torture_config_batch_mode_string(void **state)
+{
+    torture_config_batch_mode(state, NULL, LIBSSH_TESTCONFIG_STRING19);
+}
+
+/**
+ * @brief Verify we can parse BatchMode configuration option from file
+ */
+static void torture_config_batch_mode_file(void **state)
+{
+    torture_config_batch_mode(state, LIBSSH_TESTCONFIG19, NULL);
+}
+
+/**
  * @brief Verify we can parse AdressFamily configuration option
  */
 static void torture_config_address_family(void **state,
@@ -2046,6 +2106,13 @@ static void torture_config_rekey(void **state,
     ssh_options_set(session, SSH_OPTIONS_HOST, "data3");
     _parse_config(session, file, string, SSH_OK);
     assert_int_equal(session->opts.rekey_data, 521 * 1024);
+    assert_int_equal(session->opts.rekey_time, 0);
+
+    /* 5k*n -> 5120 (Invalid suffix is ignored) */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "data4");
+    _parse_config(session, file, string, SSH_OK);
+    assert_int_equal(session->opts.rekey_data, 5 * 1024);
     assert_int_equal(session->opts.rekey_time, 0);
 
     /* default 3D */
@@ -2563,21 +2630,21 @@ static void torture_config_parser_get_cmd(void **state)
     (void)state;
 
     /* Ignore leading whitespace */
-    strncpy(data, "  \t\t  string\n", sizeof(data));
+    strlcpy(data, "  \t\t  string\n", sizeof(data));
     p = data;
     tok = ssh_config_get_cmd(&p);
     assert_string_equal(tok, "string");
     assert_int_equal(*p, '\0');
 
     /* but keeps the trailing whitespace */
-    strncpy(data, "string  \t\t  \n", sizeof(data));
+    strlcpy(data, "string  \t\t  \n", sizeof(data));
     p = data;
     tok = ssh_config_get_cmd(&p);
     assert_string_equal(tok, "string  \t\t  ");
     assert_int_equal(*p, '\0');
 
     /* should not drop the quotes and not split them into separate arguments */
-    strncpy(data, "\"multi string\" something\n", sizeof(data));
+    strlcpy(data, "\"multi string\" something\n", sizeof(data));
     p = data;
     tok = ssh_config_get_cmd(&p);
     assert_string_equal(tok, "\"multi string\" something");
@@ -2585,7 +2652,7 @@ static void torture_config_parser_get_cmd(void **state)
 
     /* But it does not split tokens by whitespace
      * if they are not quoted, which is weird */
-    strncpy(data, "multi string something\n", sizeof(data));
+    strlcpy(data, "multi string something\n", sizeof(data));
     p = data;
     tok = ssh_config_get_cmd(&p);
     assert_string_equal(tok, "multi string something");
@@ -2646,33 +2713,33 @@ static void torture_config_parser_get_token(void **state)
     (void)state;
 
     /* Ignore leading whitespace (from get_cmd() already */
-    strncpy(data, "  \t\t  string\n", sizeof(data));
+    strlcpy(data, "  \t\t  string\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "string");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "  \t\t  string", sizeof(data));
+    strlcpy(data, "  \t\t  string", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "string");
     assert_int_equal(*p, '\0');
 
     /* drops trailing whitespace */
-    strncpy(data, "string  \t\t  \n", sizeof(data));
+    strlcpy(data, "string  \t\t  \n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "string");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "string  \t\t  ", sizeof(data));
+    strlcpy(data, "string  \t\t  ", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "string");
     assert_int_equal(*p, '\0');
 
     /* Correctly handles tokens in quotes */
-    strncpy(data, "\"multi string\" something\n", sizeof(data));
+    strlcpy(data, "\"multi string\" something\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "multi string");
@@ -2681,7 +2748,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "something");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "\"multi string\" something", sizeof(data));
+    strlcpy(data, "\"multi string\" something", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "multi string");
@@ -2691,7 +2758,7 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* Consistently splits unquoted strings */
-    strncpy(data, "multi string something\n", sizeof(data));
+    strlcpy(data, "multi string something\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "multi");
@@ -2703,7 +2770,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "something");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "multi string something", sizeof(data));
+    strlcpy(data, "multi string something", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "multi");
@@ -2716,7 +2783,7 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* It is made to parse also option=value pairs as well */
-    strncpy(data, "  key=value  \n", sizeof(data));
+    strlcpy(data, "  key=value  \n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2725,7 +2792,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "value");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "  key=value  ", sizeof(data));
+    strlcpy(data, "  key=value  ", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2735,7 +2802,7 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* spaces are allowed also around the equal sign */
-    strncpy(data, "  key  =  value  \n", sizeof(data));
+    strlcpy(data, "  key  =  value  \n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2744,7 +2811,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "value");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "  key  =  value  ", sizeof(data));
+    strlcpy(data, "  key  =  value  ", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2754,7 +2821,7 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* correctly parses even key=value pairs with either one in quotes */
-    strncpy(data, "  key=\"value with spaces\" \n", sizeof(data));
+    strlcpy(data, "  key=\"value with spaces\" \n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2763,7 +2830,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "value with spaces");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "  key=\"value with spaces\" ", sizeof(data));
+    strlcpy(data, "  key=\"value with spaces\" ", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2783,7 +2850,7 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* Only one equal sign is allowed */
-    strncpy(data, "key==value\n", sizeof(data));
+    strlcpy(data, "key==value\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2795,7 +2862,7 @@ static void torture_config_parser_get_token(void **state)
     assert_string_equal(tok, "value");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "key==value", sizeof(data));
+    strlcpy(data, "key==value", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "key");
@@ -2808,26 +2875,26 @@ static void torture_config_parser_get_token(void **state)
     assert_int_equal(*p, '\0');
 
     /* Unmatched quotes */
-    strncpy(data, " \"value\n", sizeof(data));
+    strlcpy(data, " \"value\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "value");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, " \"value", sizeof(data));
+    strlcpy(data, " \"value", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "value");
     assert_int_equal(*p, '\0');
 
     /* Escaped quotes */
-    strncpy(data, " \"value with \\\"escaped\\\" quotes\"   \n", sizeof(data));
+    strlcpy(data, " \"value with \\\"escaped\\\" quotes\"   \n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "value with \"escaped\" quotes");
     assert_int_equal(*p, '\0');
 
-    strncpy(data, "\\\"value with \\\"escaped\\\" quotes\\\"\n", sizeof(data));
+    strlcpy(data, "\\\"value with \\\"escaped\\\" quotes\\\"\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "\\\"value");
@@ -3459,6 +3526,49 @@ static void torture_config_hostname(void **state)
     assert_non_null(expanded);
     assert_string_equal(expanded, "my_alias");
     free(expanded);
+
+    /* HostName should be lowercased */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my_host");
+    _parse_config(session,
+                  NULL,
+                  "Host my_host\n\tHostname LOCALHOST\n",
+                  SSH_OK);
+    assert_string_equal(session->opts.host, "localhost");
+}
+
+static void torture_config_boolean_aliases(void **state)
+{
+    ssh_session session = *state;
+
+    /* Verify true/false/yes/no are accepted and case-insensitive */
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking yes\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 1);
+
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking no\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 0);
+
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking true\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 1);
+
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking false\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 0);
+
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking TRUE\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 1);
+
+    /* Invalid suffix should be ignored and not applied to session */
+    torture_reset_config(session);
+    _parse_config(session, NULL, "StrictHostKeyChecking yes\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 1);
+
+    _parse_config(session, NULL, "StrictHostKeyChecking no_please\n", SSH_OK);
+    assert_int_equal(session->opts.StrictHostKeyChecking, 1);
 }
 
 /* Invalid configuration files
@@ -3551,6 +3661,12 @@ int torture_run_tests(void)
         cmocka_unit_test_setup_teardown(torture_config_control_master_string,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(torture_config_batch_mode_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_batch_mode_string,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_config_address_family_file,
                                         setup,
                                         teardown),
@@ -3637,6 +3753,9 @@ int torture_run_tests(void)
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_jump, setup, teardown),
         cmocka_unit_test_setup_teardown(torture_config_hostname,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_boolean_aliases,
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_invalid,

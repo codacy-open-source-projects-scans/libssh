@@ -703,6 +703,17 @@ int ssh_options_set_algo(ssh_session session,
  *                 - SSH_ADDRESS_FAMILY_INET: IPv4 only
  *                 - SSH_ADDRESS_FAMILY_INET6: IPv6 only
  *
+ *              - SSH_OPTIONS_BATCH_MODE
+ *                If set to true, indicates that the application is running
+ *                non-interactively and must not prompt the user. The
+ *                application is responsible for skipping password
+ *                authentication and keyboard-interactive authentication,
+ *                and for returning failure from passphrase callbacks instead
+ *                of prompting the user. Use ssh_options_get_int() with
+ *                SSH_OPTIONS_BATCH_MODE to read back this value after
+ *                parsing a configuration file.
+ *                (bool)
+ *
  * @param  value The value to set. This is a generic pointer and the
  *               datatype which is used should be set according to the
  *               type set.
@@ -724,7 +735,8 @@ int ssh_options_set_algo(ssh_session session,
  *               to a pointer when it should have just been a pointer), then the
  *               behaviour is undefined.
  */
-int ssh_options_set(ssh_session session, enum ssh_options_e type,
+int ssh_options_set(ssh_session session,
+                    enum ssh_options_e type,
                     const void *value)
 {
     const char *v = NULL;
@@ -748,6 +760,7 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
             } else {
                 char *username = NULL, *hostname = NULL;
                 char *strict_hostname = NULL;
+                char *normalized = NULL;
 
                 /* Non-strict parse: reject shell metacharacters */
                 rc = ssh_config_parse_uri(value,
@@ -776,12 +789,22 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 }
 
                 /* Strict parse: set host only if valid hostname or IP */
-                rc = ssh_config_parse_uri(value,
-                                          NULL,
-                                          &strict_hostname,
-                                          NULL,
-                                          true,
-                                          true);
+                rc = ssh_normalize_loose_ip(value, &normalized);
+                if (rc == -1) {
+                    /* Error */
+                    SAFE_FREE(username);
+                    ssh_set_error_oom(session);
+                    return -1;
+                }
+                rc = ssh_config_parse_uri(
+                    (normalized != NULL) ? normalized : value,
+                    NULL,
+                    &strict_hostname,
+                    NULL,
+                    true,
+                    true);
+                SAFE_FREE(normalized);
+
                 if (rc != SSH_OK || strict_hostname == NULL) {
                     SAFE_FREE(session->opts.host);
                     SAFE_FREE(strict_hostname);
@@ -1523,6 +1546,15 @@ int ssh_options_set(ssh_session session, enum ssh_options_e type,
                 session->opts.address_family = *x;
             }
             break;
+        case SSH_OPTIONS_BATCH_MODE:
+            if (value == NULL) {
+                ssh_set_error_invalid(session);
+                return -1;
+            } else {
+                bool *x = (bool *)value;
+                session->opts.batch_mode = *x;
+            }
+            break;
         default:
             ssh_set_error(session, SSH_REQUEST_DENIED, "Unknown ssh option %d", type);
             return -1;
@@ -1573,30 +1605,123 @@ char *ssh_options_get_algo(ssh_session session,
 
 
 /**
- * @brief This function can get ssh the ssh port. It must only be used on
- *        a valid ssh session. This function is useful when the session
- *        options have been automatically inferred from the environment
- *        or configuration files and one
+ * @brief Get an integer or boolean SSH option from the session.
  *
- * @param  session An allocated SSH session structure.
+ * This function is useful when the session options have been automatically
+ * inferred from the environment or configuration files and the application
+ * needs to read back an integer or boolean option value.
  *
- * @param  port_target An unsigned integer into which the
- *         port will be set from the ssh session.
+ * @param  session   An allocated SSH session structure.
  *
- * @return       0 on success, < 0 on error.
+ * @param  type     The option type to get. This could be one of the
+ *                  following:
+ *                  - SSH_OPTIONS_ADDRESS_FAMILY
+ *                  - SSH_OPTIONS_BATCH_MODE
+ *                  - SSH_OPTIONS_CONTROL_MASTER
+ *                  - SSH_OPTIONS_PORT
+ *                  - SSH_OPTIONS_IDENTITIES_ONLY
+ *                  - SSH_OPTIONS_LOG_VERBOSITY
+ *                  - SSH_OPTIONS_STRICTHOSTKEYCHECK
+ *                  - SSH_OPTIONS_NODELAY
+ *                  - SSH_OPTIONS_RSA_MIN_SIZE
+ *                  - SSH_OPTIONS_PASSWORD_AUTH
+ *                  - SSH_OPTIONS_PUBKEY_AUTH
+ *                  - SSH_OPTIONS_KBDINT_AUTH
+ *                  - SSH_OPTIONS_GSSAPI_AUTH
+ *                  - SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS
+ *                  - SSH_OPTIONS_GSSAPI_KEY_EXCHANGE
  *
+ * @param  value    A pointer to an integer to store the option value.
+ *
+ * @return          SSH_OK on success, SSH_ERROR on error.
+ */
+int ssh_options_get_int(ssh_session session,
+                        enum ssh_options_e type,
+                        int *value)
+{
+    if (session == NULL || value == NULL) {
+        return SSH_ERROR;
+    }
+
+    switch (type) {
+    case SSH_OPTIONS_ADDRESS_FAMILY:
+        *value = session->opts.address_family;
+        break;
+    case SSH_OPTIONS_PORT:
+        *value = (session->opts.port == 0) ? 22 : (int)session->opts.port;
+        break;
+    case SSH_OPTIONS_BATCH_MODE:
+        *value = session->opts.batch_mode ? 1 : 0;
+        break;
+    case SSH_OPTIONS_CONTROL_MASTER:
+        *value = session->opts.control_master;
+        break;
+    case SSH_OPTIONS_IDENTITIES_ONLY:
+        *value = session->opts.identities_only ? 1 : 0;
+        break;
+    case SSH_OPTIONS_LOG_VERBOSITY:
+        *value = session->common.log_verbosity;
+        break;
+    case SSH_OPTIONS_STRICTHOSTKEYCHECK:
+        *value = session->opts.StrictHostKeyChecking;
+        break;
+    case SSH_OPTIONS_NODELAY:
+        *value = session->opts.nodelay;
+        break;
+    case SSH_OPTIONS_RSA_MIN_SIZE:
+        *value = session->opts.rsa_min_size;
+        break;
+    case SSH_OPTIONS_PASSWORD_AUTH:
+        *value = (session->opts.flags & SSH_OPT_FLAG_PASSWORD_AUTH) ? 1 : 0;
+        break;
+    case SSH_OPTIONS_PUBKEY_AUTH:
+        *value = (session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH) ? 1 : 0;
+        break;
+    case SSH_OPTIONS_KBDINT_AUTH:
+        *value = (session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH) ? 1 : 0;
+        break;
+    case SSH_OPTIONS_GSSAPI_AUTH:
+        *value = (session->opts.flags & SSH_OPT_FLAG_GSSAPI_AUTH) ? 1 : 0;
+        break;
+    case SSH_OPTIONS_GSSAPI_DELEGATE_CREDENTIALS:
+        *value = session->opts.gss_delegate_creds ? 1 : 0;
+        break;
+#ifdef WITH_GSSAPI
+    case SSH_OPTIONS_GSSAPI_KEY_EXCHANGE:
+        *value = session->opts.gssapi_key_exchange ? 1 : 0;
+        break;
+#endif
+    default:
+        ssh_set_error_invalid(session);
+        return SSH_ERROR;
+    }
+
+    return SSH_OK;
+}
+
+/**
+ * @brief This function returns the port number set for the SSH session.
+ *
+ * It is either the port set explicitly via ssh_options_set() or the value
+ * read from the configuration file. If no port has been set, the default
+ * port 22 is returned.
+ *
+ * @param  session      An allocated SSH session structure.
+ *
+ * @param  port_target  A pointer to an unsigned integer to store the port.
+ *
+ * @return              0 on success, < 0 on error.
  */
 int ssh_options_get_port(ssh_session session, unsigned int* port_target) {
-    if (session == NULL) {
+    int value;
+    int rc;
+
+    rc = ssh_options_get_int(session, SSH_OPTIONS_PORT, &value);
+    if (rc != SSH_OK) {
         return -1;
     }
 
-    if (session->opts.port == 0) {
-        *port_target = 22;
-        return 0;
-    }
-
-    *port_target = session->opts.port;
+    *port_target = (unsigned int)value;
 
     return 0;
 }
@@ -2108,6 +2233,28 @@ int ssh_options_apply(ssh_session session)
 {
     char *tmp = NULL;
     int rc;
+
+    if (session->opts.host != NULL) {
+        char *normalized_host = NULL;
+        rc = ssh_normalize_loose_ip(session->opts.host, &normalized_host);
+        if (rc == -1) {
+            /* Error (e.g. NULL input or OOM) — leave host as it is */
+        } else if (rc == 0) {
+            /* Was a loose IP — use the normalized dotted-quad form */
+            SAFE_FREE(session->opts.host);
+            session->opts.host = normalized_host;
+        } else {
+            /* rc == 1: not a loose IP — lowercase if it's not a strict IP */
+            bool is_ip = ssh_is_ipaddr(session->opts.host);
+            if (!is_ip) {
+                char *lower = ssh_lowercase(session->opts.host);
+                if (lower != NULL) {
+                    SAFE_FREE(session->opts.host);
+                    session->opts.host = lower;
+                }
+            }
+        }
+    }
 
     if (session->opts.sshdir == NULL) {
         rc = ssh_options_set(session, SSH_OPTIONS_SSH_DIR, NULL);
@@ -2969,7 +3116,7 @@ static char *ssh_bind_options_expand_escape(ssh_bind sshbind, const char *s)
             return NULL;
         }
         l = strlen(buf);
-        strncpy(buf + l, x, MAX_BUF_SIZE - l - 1);
+        strlcpy(buf + l, x, MAX_BUF_SIZE - l);
         buf[i] = '\0';
         SAFE_FREE(x);
     }

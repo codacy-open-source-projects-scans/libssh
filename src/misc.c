@@ -1145,8 +1145,7 @@ char *ssh_dirname (const char *path)
     return NULL;
   }
 
-  strncpy(new, path, len);
-  new[len] = '\0';
+  strlcpy(new, path, len + 1);
 
   return new;
 }
@@ -1203,8 +1202,7 @@ char *ssh_basename (const char *path)
     return NULL;
   }
 
-  strncpy(new, s, len);
-  new[len] = '\0';
+  strlcpy(new, s, len + 1);
 
   return new;
 }
@@ -1621,7 +1619,7 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
             return NULL;
         }
         l = strlen(buf);
-        strncpy(buf + l, x, MAX_BUF_SIZE - l - 1);
+        strlcpy(buf + l, x, MAX_BUF_SIZE - l);
         buf[i] = '\0';
         SAFE_FREE(x);
     }
@@ -2643,6 +2641,112 @@ FILE *ssh_strict_fopen(const char *filename, size_t max_file_size)
 
     /* the flcose() will close also the underlying fd */
     return f;
+}
+
+/*
+ * BSD-compatible fallback implementations for systems without native
+ * strlcpy/strlcat. These are original implementations following the OpenBSD API
+ * specification. The strlcpy() and strlcat() API was designed by Todd C.
+ * Miller. See: https://man.openbsd.org/strlcpy.3
+ */
+
+#ifndef HAVE_STRLCPY
+size_t strlcpy(char *dst, const char *src, size_t size)
+{
+    size_t len = strlen(src);
+
+    if (size != 0) {
+        size_t copy_len = (len >= size) ? size - 1 : len;
+
+        memcpy(dst, src, copy_len);
+        dst[copy_len] = '\0';
+    }
+
+    return len;
+}
+#endif /* HAVE_STRLCPY */
+
+#ifndef HAVE_STRLCAT
+size_t strlcat(char *dst, const char *src, size_t size)
+{
+    size_t dst_len;
+    const char *p = memchr(dst, '\0', size);
+    size_t src_len = strlen(src);
+
+    dst_len = (p != NULL) ? (size_t)(p - dst) : size;
+
+    if (dst_len < size) {
+        size_t copy_len =
+            (src_len >= size - dst_len) ? size - dst_len - 1 : src_len;
+        memcpy(dst + dst_len, src, copy_len);
+        dst[dst_len + copy_len] = '\0';
+    }
+
+    return dst_len + src_len;
+}
+#endif /* HAVE_STRLCAT */
+
+/**
+ * @brief Normalizes a loose IPv4 string (e.g. "0", "127.1") to dotted-quad
+ *        format.
+ *
+ * @param[in]  host   The hostname string to normalize.
+ * @param[out] result On success (returns 0), set to a newly allocated
+ *                    dotted-quad string. The caller must free it.
+ *                    Untouched on other return values.
+ *
+ * @return  0 if the input was a loose IPv4 and was normalized successfully.
+ *          1 if the input is not a loose IPv4 address (not an error).
+ *         -1 on error (NULL input or internal failure).
+ */
+int ssh_normalize_loose_ip(const char *host, char **result)
+{
+    struct in_addr addr;
+    char buf[INET_ADDRSTRLEN];
+    const char *p = NULL;
+    int rc;
+    int is_ip;
+#ifdef _WIN32
+    unsigned long ip;
+    int is_broadcast;
+#endif
+
+    if (host == NULL || result == NULL) {
+        return -1;
+    }
+
+    /* We don't want to normalize stricter IP checks already handled by valid
+     * IPv4/IPv6 */
+    is_ip = ssh_is_ipaddr(host);
+    if (is_ip) {
+        return 1; /* not a loose IP — already a strict address */
+    }
+
+#ifdef _WIN32
+    ip = inet_addr(host);
+    is_broadcast = strcmp(host, "255.255.255.255");
+    if (ip == INADDR_NONE && is_broadcast != 0) {
+        return 1; /* not a loose IP */
+    }
+    addr.S_un.S_addr = ip;
+#else
+    rc = inet_aton(host, &addr);
+    if (rc == 0) {
+        return 1; /* not a loose IP */
+    }
+#endif
+
+    p = inet_ntop(AF_INET, &addr, buf, sizeof(buf));
+    if (p == NULL) {
+        return -1;
+    }
+
+    *result = strdup(p);
+    if (*result == NULL) {
+        return -1;
+    }
+
+    return 0;
 }
 
 /** @} */

@@ -1035,6 +1035,12 @@ torture_setup_create_sshd_config(void **state, bool pam, bool second_sshd)
         "\n"
         "GSSAPIKeyExchange no\n"
         "KexAlgorithms "
+#if defined(OPENSSH_MLKEM768NISTP256_SHA256)
+        "mlkem768nistp256-sha256,"
+#ifdef HAVE_MLKEM1024
+        "mlkem1024nistp384-sha384,"
+#endif
+#endif
         "ecdh-sha2-nistp256,ecdh-sha2-nistp384,"
         "ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256,"
         "diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,"
@@ -1868,8 +1874,7 @@ static int recursive_rm_dir_content(const char *path)
     int rc = 0;
     BOOL removed;
 
-    strcpy(file_path, path);
-    strcat(file_path, "\\*");
+    snprintf(file_path, sizeof(file_path), "%s\\*", path);
 
     file_handle = FindFirstFile(file_path, &file_data);
 
@@ -1897,9 +1902,11 @@ static int recursive_rm_dir_content(const char *path)
             }
 
             /* Create full file path */
-            strcpy(file_path, path);
-            strcat(file_path, "\\");
-            strcat(file_path, file_data.cFileName);
+            snprintf(file_path,
+                     sizeof(file_path),
+                     "%s\\%s",
+                     path,
+                     file_data.cFileName);
 
             attributes = GetFileAttributes(file_path);
             if (attributes & FILE_ATTRIBUTE_DIRECTORY) {

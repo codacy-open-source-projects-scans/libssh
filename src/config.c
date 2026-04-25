@@ -92,7 +92,7 @@ static struct ssh_config_keyword_table_s ssh_config_keyword_table[] = {
     {"pubkeyauthentication", SOC_PUBKEYAUTHENTICATION, true},
     {"addkeystoagent", SOC_UNSUPPORTED, true},
     {"addressfamily", SOC_ADDRESSFAMILY, true},
-    {"batchmode", SOC_UNSUPPORTED, true},
+    {"batchmode", SOC_BATCHMODE, true},
     {"canonicaldomains", SOC_UNSUPPORTED, true},
     {"canonicalizefallbacklocal", SOC_UNSUPPORTED, true},
     {"canonicalizehostname", SOC_UNSUPPORTED, true},
@@ -1343,19 +1343,31 @@ static int ssh_config_parse_line_internal(ssh_session session,
         }
         break;
     case SOC_HOSTNAME:
-      p = ssh_config_get_str_tok(&s, NULL);
-      CHECK_COND_OR_FAIL(p == NULL, "Missing argument");
-      if (*parsing) {
-          char *z = ssh_path_expand_escape(session, p);
-          if (z == NULL) {
-              z = strdup(p);
-          }
-          session->opts.config_hostname_only = true;
-          ssh_options_set(session, SSH_OPTIONS_HOST, z);
-          session->opts.config_hostname_only = false;
-          free(z);
-      }
-      break;
+        p = ssh_config_get_str_tok(&s, NULL);
+        CHECK_COND_OR_FAIL(p == NULL, "Missing argument");
+        if (*parsing) {
+            char *z = NULL;
+            char *lower = NULL;
+            z = ssh_path_expand_escape(session, p);
+            if (z == NULL) {
+                z = strdup(p);
+            }
+            if (z != NULL) {
+                /* Always lowercase hostname */
+                lower = ssh_lowercase(z);
+                if (lower == NULL) {
+                    SAFE_FREE(z);
+                    SAFE_FREE(x);
+                    return -1;
+                }
+                session->opts.config_hostname_only = true;
+                ssh_options_set(session, SSH_OPTIONS_HOST, lower);
+                free(lower);
+                session->opts.config_hostname_only = false;
+                free(z);
+            }
+        }
+        break;
     case SOC_PORT:
         p = ssh_config_get_str_tok(&s, NULL);
         CHECK_COND_OR_FAIL(p == NULL, "Missing argument");
@@ -1548,6 +1560,7 @@ static int ssh_config_parse_line_internal(ssh_session session,
                 break;
             }
             switch (*endp) {
+            case 'g':
             case 'G':
                 if (ll > LLONG_MAX / 1024) {
                     SSH_LOG(SSH_LOG_TRACE, "Possible overflow of rekey limit");
@@ -1556,6 +1569,7 @@ static int ssh_config_parse_line_internal(ssh_session session,
                 }
                 ll = ll * 1024;
                 FALL_THROUGH;
+            case 'm':
             case 'M':
                 if (ll > LLONG_MAX / 1024) {
                     SSH_LOG(SSH_LOG_TRACE, "Possible overflow of rekey limit");
@@ -1564,6 +1578,7 @@ static int ssh_config_parse_line_internal(ssh_session session,
                 }
                 ll = ll * 1024;
                 FALL_THROUGH;
+            case 'k':
             case 'K':
                 if (ll > LLONG_MAX / 1024) {
                     SSH_LOG(SSH_LOG_TRACE, "Possible overflow of rekey limit");
@@ -1577,12 +1592,8 @@ static int ssh_config_parse_line_internal(ssh_session session,
                 /* just the number */
                 break;
             default:
-                /* Invalid suffix */
-                ll = -1;
-                break;
-            }
-            if (*endp != ' ' && *endp != '\0') {
-                CHECK_COND_OR_FAIL(1, "Invalid trailing characters");
+                /* Ignore invalid suffix and trailing garbage */
+                SSH_LOG(SSH_LOG_TRACE, "Ignoring invalid suffix");
                 break;
             }
         }
@@ -1651,12 +1662,8 @@ static int ssh_config_parse_line_internal(ssh_session session,
                 /* just the number */
                 break;
             default:
-                /* Invalid suffix */
-                ll = -1;
-                break;
-            }
-            if (*endp != '\0') {
-                CHECK_COND_OR_FAIL(1, "Invalid trailing characters");
+                /* Ignore invalid suffix and trailing garbage */
+                SSH_LOG(SSH_LOG_TRACE, "Ignoring invalid suffix");
                 break;
             }
         }
@@ -1703,6 +1710,14 @@ static int ssh_config_parse_line_internal(ssh_session session,
           ssh_options_set(session, SSH_OPTIONS_IDENTITIES_ONLY, &b);
       }
       break;
+    case SOC_BATCHMODE:
+        i = ssh_config_get_yesno(&s, -1);
+        CHECK_COND_OR_FAIL(i < 0, "Invalid argument");
+        if (*parsing) {
+            bool b = i;
+            ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &b);
+        }
+        break;
     case SOC_CONTROLMASTER:
       p = ssh_config_get_str_tok(&s, NULL);
       CHECK_COND_OR_FAIL(p == NULL, "ControlMaster");

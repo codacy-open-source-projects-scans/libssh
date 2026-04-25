@@ -433,6 +433,7 @@ enum ssh_options_e {
     SSH_OPTIONS_GSSAPI_KEY_EXCHANGE,
     SSH_OPTIONS_GSSAPI_KEY_EXCHANGE_ALGS,
     SSH_OPTIONS_NEXT_IDENTITY,
+    SSH_OPTIONS_BATCH_MODE,
 };
 
 enum {
@@ -686,6 +687,8 @@ LIBSSH_API int ssh_options_set(ssh_session session, enum ssh_options_e type,
 LIBSSH_API int ssh_options_get(ssh_session session, enum ssh_options_e type,
     char **value);
 LIBSSH_API int ssh_options_get_port(ssh_session session, unsigned int * port_target);
+LIBSSH_API int ssh_options_get_int(ssh_session session, enum ssh_options_e type,
+    int *value);
 LIBSSH_API int ssh_pcap_file_close(ssh_pcap_file pcap);
 LIBSSH_API void ssh_pcap_file_free(ssh_pcap_file pcap);
 LIBSSH_API ssh_pcap_file ssh_pcap_file_new(void);
