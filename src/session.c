@@ -38,6 +38,7 @@
 #include "libssh/ssh2.h"
 #include "libssh/agent.h"
 #include "libssh/packet.h"
+#include "libssh/kex.h"
 #include "libssh/session.h"
 #include "libssh/misc.h"
 #include "libssh/buffer.h"
@@ -115,51 +116,25 @@ ssh_session ssh_new(void)
     }
 
     /* OPTIONS */
-    session->opts.StrictHostKeyChecking = 1;
+    session->opts.StrictHostKeyChecking = SSH_STRICT_HOSTKEY_ASK;
     session->opts.port = 22;
     session->opts.fd = -1;
     session->opts.compressionlevel = 7;
     session->opts.nodelay = 0;
     session->opts.identities_only = false;
+    session->opts.server_alive_interval = 0;
+    session->opts.server_alive_count_max = 3;
     session->opts.batch_mode = false;
+    session->opts.gateway_ports = false;
     session->opts.control_master = SSH_CONTROL_MASTER_NO;
 
     session->opts.flags = SSH_OPT_FLAG_PASSWORD_AUTH |
                           SSH_OPT_FLAG_PUBKEY_AUTH |
                           SSH_OPT_FLAG_KBDINT_AUTH |
                           SSH_OPT_FLAG_GSSAPI_AUTH;
+    session->opts.pubkey_auth = SSH_PUBKEY_AUTH_ALL;
 
     session->opts.exp_flags = 0;
-
-    session->opts.identity = ssh_list_new();
-    if (session->opts.identity == NULL) {
-        goto err;
-    }
-    session->opts.identity_non_exp = ssh_list_new();
-    if (session->opts.identity_non_exp == NULL) {
-        goto err;
-    }
-
-    session->opts.certificate = ssh_list_new();
-    if (session->opts.certificate == NULL) {
-        goto err;
-    }
-    session->opts.certificate_non_exp = ssh_list_new();
-    if (session->opts.certificate_non_exp == NULL) {
-        goto err;
-    }
-    /* the default certificates are loaded automatically from the default
-     * identities later */
-
-    session->opts.proxy_jumps = ssh_list_new();
-    if (session->opts.proxy_jumps == NULL) {
-        goto err;
-    }
-
-    session->opts.proxy_jumps_user_cb = ssh_list_new();
-    if (session->opts.proxy_jumps_user_cb == NULL) {
-        goto err;
-    }
 
 #ifdef WITH_GSSAPI
     session->opts.gssapi_key_exchange_algs =
@@ -168,6 +143,14 @@ ssh_session ssh_new(void)
         goto err;
     }
 #endif /* WITH_GSSAPI */
+
+    /* Lazy allocation for identity_non_exp before populating the defaults */
+    if (session->opts.identity_non_exp == NULL) {
+        session->opts.identity_non_exp = ssh_list_new();
+        if (session->opts.identity_non_exp == NULL) {
+            goto err;
+        }
+    }
 
     id = strdup("%d/.ssh/id_ed25519");
     if (id == NULL) {
@@ -387,6 +370,17 @@ void ssh_free(ssh_session session)
     SSH_LIST_FREE(session->opts.proxy_jumps_user_cb);
     SAFE_FREE(session->opts.proxy_jumps_str);
 
+    if (session->opts.send_env) {
+        char *pattern = NULL;
+
+        for (pattern = ssh_list_pop_head(char *, session->opts.send_env);
+             pattern != NULL;
+             pattern = ssh_list_pop_head(char *, session->opts.send_env)) {
+            SAFE_FREE(pattern);
+        }
+        ssh_list_free(session->opts.send_env);
+    }
+
     while ((b = ssh_list_pop_head(struct ssh_buffer_struct *,
                                   session->out_queue)) != NULL) {
         SSH_BUFFER_FREE(b);
@@ -408,6 +402,7 @@ void ssh_free(ssh_session session)
   SAFE_FREE(session->opts.username);
   SAFE_FREE(session->opts.host);
   SAFE_FREE(session->opts.originalhost);
+  SAFE_FREE(session->opts.config_hostname);
   SAFE_FREE(session->opts.tag);
   SAFE_FREE(session->opts.homedir);
   SAFE_FREE(session->opts.sshdir);
@@ -418,6 +413,30 @@ void ssh_free(ssh_session session)
   SAFE_FREE(session->opts.gss_client_identity);
   SAFE_FREE(session->opts.pubkey_accepted_types);
   SAFE_FREE(session->opts.control_path);
+  SAFE_FREE(session->opts.preferred_authentications);
+  SAFE_FREE(session->opts.forward_agent_sock_path);
+
+  if (session->opts.local_forward) {
+      char *entry = NULL;
+
+      for (entry = ssh_list_pop_head(char *, session->opts.local_forward);
+           entry != NULL;
+           entry = ssh_list_pop_head(char *, session->opts.local_forward)) {
+          SAFE_FREE(entry);
+      }
+      ssh_list_free(session->opts.local_forward);
+  }
+
+  if (session->opts.remote_forward) {
+      char *entry = NULL;
+
+      for (entry = ssh_list_pop_head(char *, session->opts.remote_forward);
+           entry != NULL;
+           entry = ssh_list_pop_head(char *, session->opts.remote_forward)) {
+          SAFE_FREE(entry);
+      }
+      ssh_list_free(session->opts.remote_forward);
+  }
 
   for (i = 0; i < SSH_KEX_METHODS; i++) {
       if (session->opts.wanted_methods[i]) {
@@ -525,10 +544,25 @@ const char* ssh_get_kex_algo(ssh_session session) {
         return "diffie-hellman-group-exchange-sha256";
 #endif /* WITH_GEX */
     }
-
     return NULL;
 }
 
+/**
+ * @brief Check if current session keys were exchanged using
+ *        a GSSAPI key exchange method.
+ *
+ * @param[in] session The SSH session.
+ *
+ * @return True if GSSAPI key exchange took place, false otherwise
+ *         (other or no key exchange took place).
+ */
+bool ssh_session_kex_is_gss(ssh_session session)
+{
+    if (session == NULL || session->current_crypto == NULL) {
+        return false;
+    }
+    return ssh_kex_is_gss(session->current_crypto);
+}
 /**
  * @brief get the name of the input cipher for the given session.
  *

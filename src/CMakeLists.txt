@@ -127,7 +127,6 @@ set(libssh_SRCS
   pki_container_openssh.c
   poll.c
   session.c
-  scp.c
   socket.c
   string.c
   threads.c
@@ -217,6 +216,7 @@ elseif (WITH_MBEDTLS)
         threads/mbedtls.c
         libmbedcrypto.c
         mbedcrypto_missing.c
+        mbedcrypto_v4.c
         pki_mbedcrypto.c
         ecdh_mbedcrypto.c
         getrandom_mbedcrypto.c
@@ -287,6 +287,13 @@ if (WITH_SFTP)
     )
   endif (WITH_SERVER)
 endif (WITH_SFTP)
+
+if (WITH_SCP)
+  set(libssh_SRCS
+    ${libssh_SRCS}
+    scp.c
+  )
+endif (WITH_SCP)
 
 if (WITH_SERVER)
   set(libssh_SRCS
@@ -439,7 +446,6 @@ if (WITH_COVERAGE)
     include(CodeCoverage)
     append_coverage_compiler_flags_to_target(ssh)
 endif (WITH_COVERAGE)
-
 
 install(TARGETS ssh
         EXPORT libssh-config

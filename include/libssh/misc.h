@@ -53,7 +53,12 @@ int ssh_file_readaccess_ok(const char *file);
 int ssh_dir_writeable(const char *path);
 
 char *ssh_path_expand_tilde(const char *d);
+/* Expand a string using session option values. */
 char *ssh_path_expand_escape(ssh_session session, const char *s);
+/* Expand a string without tilde expansion. */
+char *ssh_string_expand_escape(ssh_session session, const char *s);
+/* Expand HostName tokens. */
+char *ssh_path_expand_hostname(ssh_session session, const char *s);
 int ssh_analyze_banner(ssh_session session, int server);
 int ssh_is_ipaddr_v4(const char *str);
 int ssh_is_ipaddr(const char *str);
@@ -79,7 +84,11 @@ struct ssh_jump_info_struct {
     char *hostname;
     /** Username to authenticate with on the jump host. */
     char *username;
-    /** Port number of the jump host. */
+    /**
+     * Port number of the jump host, in the range 1-65535. Zero means the
+     * ProxyJump specification did not give a port, in which case the jump
+     * host's own configuration (or the connection default) supplies it.
+     */
     int port;
 };
 

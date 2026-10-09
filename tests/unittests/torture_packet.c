@@ -11,6 +11,13 @@
 #include "libssh/ssh2.h"
 #include "torture.h"
 
+#if defined(HAVE_LIBMBEDCRYPTO)
+#include <mbedtls/version.h>
+#ifndef MBEDTLS_VERSION_MAJOR
+#include <mbedtls/build_info.h>
+#endif
+#endif
+
 #include "socket.c"
 
 uint8_t test_data[]="\x02"
@@ -57,6 +64,7 @@ torture_packet(const char *cipher, const char *mac_type,
     uint8_t buffer[1024];
     uint8_t response[1024];
     size_t encrypted_packet_len;
+    size_t processed;
     ssh_packet_callback callbacks[]={copy_packet_data};
     struct ssh_packet_callbacks_struct cb = {
             .start=2,
@@ -123,17 +131,18 @@ torture_packet(const char *cipher, const char *mac_type,
     encrypted_packet_len = rc;
     cmp = strcmp(comp_type, "none");
     if (cmp == 0) {
-        assert_in_range(encrypted_packet_len,
-                        payload_len + 4,
-                        payload_len + (32 * 3));
+        assert_uint_in_range(encrypted_packet_len,
+                             payload_len + 4,
+                             payload_len + (32 * 3));
     }
     rc = send(sockets[0], buffer, encrypted_packet_len, 0);
     assert_int_equal(rc, encrypted_packet_len);
 
     ssh_packet_set_callbacks(session, &cb);
     ssh_burn(response, sizeof(response));
-    rc = ssh_packet_socket_callback(buffer, encrypted_packet_len, session);
-    assert_int_not_equal(rc, SSH_ERROR);
+    processed =
+        ssh_packet_socket_callback(buffer, encrypted_packet_len, session);
+    assert_int_equal(processed, encrypted_packet_len);
     if(payload_len > 0){
         assert_memory_equal(response, test_data+1, payload_len-1);
     }
@@ -274,6 +283,8 @@ static void torture_packet_aes256_cbc_etm(UNUSED_PARAM(void **state))
     }
 }
 
+/* no 3DES on mbedTLS v4 */
+#if !(defined(HAVE_LIBMBEDCRYPTO) && MBEDTLS_VERSION_MAJOR >= 4)
 static void torture_packet_3des_cbc(UNUSED_PARAM(void **state))
 {
     int i;
@@ -301,6 +312,7 @@ static void torture_packet_3des_cbc_etm(UNUSED_PARAM(void **state))
         torture_packet("3des-cbc", "hmac-sha1-etm@openssh.com", "none", i);
     }
 }
+#endif /* !(defined(HAVE_LIBMBEDCRYPTO) && MBEDTLS_VERSION_MAJOR >= 4) */
 
 static void torture_packet_chacha20(void **state)
 {
@@ -487,8 +499,11 @@ int torture_run_tests(void) {
         cmocka_unit_test(torture_packet_aes128_cbc_etm),
         cmocka_unit_test(torture_packet_aes192_cbc_etm),
         cmocka_unit_test(torture_packet_aes256_cbc_etm),
+#if !(defined(HAVE_LIBMBEDCRYPTO) && MBEDTLS_VERSION_MAJOR >= 4)
+        /* no 3DES on mbedTLS v4 */
         cmocka_unit_test(torture_packet_3des_cbc),
         cmocka_unit_test(torture_packet_3des_cbc_etm),
+#endif
         cmocka_unit_test(torture_packet_chacha20),
         cmocka_unit_test(torture_packet_aes128_gcm),
         cmocka_unit_test(torture_packet_aes256_gcm),

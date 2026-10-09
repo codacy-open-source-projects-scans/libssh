@@ -86,7 +86,11 @@ workflow:
   script:
     # torture_gssapi_key_exchange_null is excluded because of a bug
     # https://bugzilla.opensuse.org/show_bug.cgi?id=1254680
-    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+    - cmake
+        -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=mold"
+        -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=mold"
+        -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=mold"
+        $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
       make -j$(nproc) &&
       ctest --output-on-failure -E "^torture_gssapi_key_exchange_null$"
 
@@ -272,20 +276,58 @@ fedora/ninja:
 fedora/coverage:
   extends: .fedora
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  parallel:
+    matrix:
+      - COVERAGE_PROFILE:
+        - "openssl"
+        - "libgcrypt"
+        - "mbedtls"
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_BUILD_TYPE=Debug -DWITH_COVERAGE=ON"
   script:
-    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+    - |
+      case "$COVERAGE_PROFILE" in
+        "openssl")
+          EXTRA_CMAKE_OPT="-DWITH_PKCS11_URI=ON -DWITH_PKCS11_PROVIDER=ON"
+          ;;
+        "libgcrypt")
+          EXTRA_CMAKE_OPT="-DWITH_GCRYPT=ON"
+          ;;
+        "mbedtls")
+          EXTRA_CMAKE_OPT="-DWITH_MBEDTLS=ON"
+          ;;
+      esac
+    - cmake $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS $EXTRA_CMAKE_OPT .. &&
       make -j$(nproc) &&
-      make coverage_xml
+      make coverage_json &&
+      mv coverage.json coverage-${CI_NODE_INDEX}.json
+  artifacts:
+    when: on_success
+    paths:
+      - obj/coverage-*.json
+    expire_in: 1 day
+
+fedora/coverage_merge:
+  extends: .fedora
+  image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$FEDORA_BUILD
+  needs:
+    - job: fedora/coverage
+      artifacts: true
+  dependencies:
+    - fedora/coverage
+  script: # The single-quotes are NEEDED otherwise it will process just the first one!
+    - gcovr --root ../ --add-tracefile 'coverage-*.json' --xml coverage_xml.xml
+    - gcovr --root ../ --add-tracefile 'coverage-*.json' --print-summary
+    - python3 ../.gitlab-ci/split-coverage.py coverage_xml.xml .
   coverage: /^\s*lines:\s*\d+.\d+\%/
   artifacts:
+    when: always
     name: ${CI_JOB_NAME}-${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHA}
     expire_in: 1 week
     reports:
       coverage_report:
         coverage_format: cobertura
-        path: obj/coverage_xml.xml
+        path: obj/cobertura-*.xml
 
 fedora/openssl_3.x/x86_64:
   extends: .fedora
@@ -307,6 +349,7 @@ fedora/openssl_3.x/x86_64/minimal:
       -DWITH_PCAP=OFF
       -DWITH_GSSAPI=OFF
       -DWITH_GEX=OFF
+      -DWITH_SCP=OFF
       -DUNIT_TESTING=ON
       -DCLIENT_TESTING=ON .. &&
       make -j$(nproc)
@@ -610,8 +653,13 @@ tumbleweed/openssl_3.x/x86/gcc:
 
 tumbleweed/openssl_3.x/x86_64/gcc7:
   extends: .tumbleweed
-  variables:
-    CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7"
+  script:
+    # the gcc7 does not support the -fuse-ld switch so do not include it here
+    - cmake
+      -DCMAKE_C_COMPILER=gcc-7 -DCMAKE_CXX_COMPILER=g++-7
+      $CMAKE_OPTIONS $CMAKE_ADDITIONAL_OPTIONS .. &&
+      make -j$(nproc) &&
+      ctest --output-on-failure -E "^torture_gssapi_key_exchange_null$"
 
 tumbleweed/openssl_3.x/x86/gcc7:
   extends: .tumbleweed
@@ -630,12 +678,12 @@ tumbleweed/openssl_3.x/x86_64/clang:
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
 
-tumbleweed/mbedtls-3.6.x/x86_64/gcc:
+tumbleweed/mbedtls-4.x/x86_64/gcc:
   extends: .tumbleweed
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config -DWITH_MBEDTLS=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_BLOWFISH_CIPHER=OFF "
 
-tumbleweed/mbedtls-3.6.x/x86_64/clang:
+tumbleweed/mbedtls-4.x/x86_64/clang:
   extends: .tumbleweed
   variables:
     CMAKE_ADDITIONAL_OPTIONS: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DKRB5_CONFIG=/usr/lib/mit/bin/krb5-config -DWITH_MBEDTLS=ON -DWITH_DEBUG_CRYPTO=ON -DWITH_BLOWFISH_CIPHER=OFF "
@@ -668,7 +716,7 @@ tumbleweed/static-analysis:
 ###############################################################################
 # That is a specific runner that we cannot enable universally.
 # We restrict it to builds under the $BUILD_IMAGES_PROJECT project.
-freebsd/openssl_1.1.1/x86_64:
+freebsd/openssl_3.0.x/x86_64:
   image:
   extends: .tests
   variables:
@@ -695,6 +743,7 @@ freebsd/openssl_1.1.1/x86_64:
 # usually timeout with the update to Gitlab 17.0
 .vs:
   stage: test
+  timeout: 2h
   cache:
     key: vcpkg.${CI_JOB_NAME}
     paths:
@@ -759,7 +808,7 @@ coverity:
   stage: analysis
   image: $CI_REGISTRY/$BUILD_IMAGES_PROJECT:$CENTOS9_BUILD
   script:
-    - mkdir obj && cd obj
+    - mkdir -p obj && cd obj
     - wget https://scan.coverity.com/download/linux64 --post-data "token=$COVERITY_SCAN_TOKEN&project=$COVERITY_SCAN_PROJECT_NAME" -O /tmp/coverity_tool.tgz
     - tar xf /tmp/coverity_tool.tgz
     - cmake -DCMAKE_BUILD_TYPE=Debug $CMAKE_BUILD_OPTIONS $CMAKE_TEST_OPTIONS ..
@@ -795,7 +844,6 @@ coverity:
   extends: .build_options
   tags:
     - saas-macos-medium-m1
-  image: macos-14-xcode-15
   before_script:
     - echo "MacOS runner started"
     - brew update

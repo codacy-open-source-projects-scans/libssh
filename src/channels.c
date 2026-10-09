@@ -660,6 +660,13 @@ SSH_PACKET_CALLBACK(channel_rcv_data)
             channel->local_channel,
             channel->remote_channel);
 
+    if (channel->flags & SSH_CHANNEL_FLAG_CLOSED_REMOTE) {
+        SSH_LOG(SSH_LOG_WARNING, "Received data on (remotely) closed channel");
+        ssh_set_error(session, SSH_FATAL, "Received data on (remotely) closed channel");
+        SSH_STRING_FREE(str);
+        return SSH_PACKET_USED;
+    }
+
     if (len > channel->local_window) {
         SSH_LOG(SSH_LOG_RARE,
                 "Data packet too big for our window(%" PRIu32 " vs %" PRIu32 ")",
@@ -954,7 +961,8 @@ SSH_PACKET_CALLBACK(channel_rcv_request)
         return SSH_PACKET_USED;
     }
 
-    if (strcmp(request, "auth-agent-req@openssh.com") == 0) {
+    if (strcmp(request, "auth-agent-req") == 0 ||
+        strcmp(request, "auth-agent-req@openssh.com") == 0) {
         int status;
 
         SAFE_FREE(request);
@@ -1119,6 +1127,7 @@ int ssh_channel_open_auth_agent(ssh_channel channel)
       return SSH_ERROR;
   }
 
+  /* FIXME use "auth-agent" from RFC9987 when it gets addoption */
   return channel_open(channel,
                       "auth-agent@openssh.com",
                       WINDOW_DEFAULT,
@@ -2379,7 +2388,7 @@ static ssh_channel ssh_channel_accept(ssh_session session, int channeltype,
     if (session->ssh_message_list) {
       iterator = ssh_list_get_iterator(session->ssh_message_list);
       while (iterator) {
-        msg = (ssh_message)iterator->data;
+        msg = ssh_iterator_value(ssh_message, iterator);
         if (ssh_message_type(msg) == SSH_REQUEST_CHANNEL_OPEN &&
             ssh_message_subtype(msg) == channeltype) {
           ssh_list_remove(session->ssh_message_list, iterator);
@@ -3335,7 +3344,7 @@ int ssh_channel_read_nonblocking(ssh_channel channel,
  */
 int ssh_channel_poll(ssh_channel channel, int is_stderr)
 {
-  ssh_buffer stdbuf;
+  ssh_buffer stdbuf = NULL;
 
   if ((channel == NULL) || (channel->flags & SSH_CHANNEL_FLAG_FREED_LOCAL)) {
       return SSH_ERROR;

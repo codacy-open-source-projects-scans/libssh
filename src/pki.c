@@ -64,7 +64,7 @@
 
 enum ssh_keytypes_e pki_privatekey_type_from_string(const char *privkey)
 {
-    char *start = NULL;
+    const char *start = NULL;
 
     start = strstr(privkey, RSA_HEADER_BEGIN);
     if (start != NULL) {
@@ -1081,7 +1081,7 @@ int ssh_pki_import_privkey_base64(const char *b64_key,
                                   ssh_key *pkey)
 {
     ssh_key key = NULL;
-    char *openssh_header = NULL;
+    const char *openssh_header = NULL;
 
     if (b64_key == NULL || pkey == NULL) {
         return SSH_ERROR;
@@ -2382,69 +2382,69 @@ static int pki_generate_key_internal(enum ssh_keytypes_e type,
     key->type_c = ssh_key_type_to_char(type);
     key->flags = SSH_KEY_FLAG_PRIVATE | SSH_KEY_FLAG_PUBLIC;
 
-    switch(type){
-        case SSH_KEYTYPE_RSA:
-            if (parameter != 0 && parameter < RSA_MIN_KEY_SIZE) {
-                SSH_LOG(
-                    SSH_LOG_WARN,
+    switch (type) {
+    case SSH_KEYTYPE_RSA:
+        if (parameter != 0 && parameter < RSA_MIN_KEY_SIZE) {
+            SSH_LOG(SSH_LOG_WARN,
                     "RSA key size parameter (%d) is below minimum allowed (%d)",
                     parameter,
                     RSA_MIN_KEY_SIZE);
-                goto error;
-            }
-
-            rc = pki_key_generate_rsa(key, parameter);
-            if(rc == SSH_ERROR)
-                goto error;
-            break;
-#ifdef HAVE_ECC
-        case SSH_KEYTYPE_ECDSA: /* deprecated */
-            rc = pki_key_generate_ecdsa(key, parameter);
-            if (rc == SSH_ERROR) {
-                goto error;
-            }
-
-            /* Update key type */
-            key->type_c = ssh_pki_key_ecdsa_name(key);
-            break;
-        case SSH_KEYTYPE_ECDSA_P256:
-            rc = pki_key_generate_ecdsa(key, 256);
-            if (rc == SSH_ERROR) {
-                goto error;
-            }
-            break;
-        case SSH_KEYTYPE_ECDSA_P384:
-            rc = pki_key_generate_ecdsa(key, 384);
-            if (rc == SSH_ERROR) {
-                goto error;
-            }
-            break;
-        case SSH_KEYTYPE_ECDSA_P521:
-            rc = pki_key_generate_ecdsa(key, 521);
-            if (rc == SSH_ERROR) {
-                goto error;
-            }
-            break;
-#endif /* HAVE_ECC */
-        case SSH_KEYTYPE_ED25519:
-            rc = pki_key_generate_ed25519(key);
-            if (rc == SSH_ERROR) {
-                goto error;
-            }
-            break;
-        case SSH_KEYTYPE_RSA_CERT01:
-        case SSH_KEYTYPE_ECDSA_P256_CERT01:
-        case SSH_KEYTYPE_ECDSA_P384_CERT01:
-        case SSH_KEYTYPE_ECDSA_P521_CERT01:
-        case SSH_KEYTYPE_ED25519_CERT01:
-        case SSH_KEYTYPE_SK_ECDSA:
-        case SSH_KEYTYPE_SK_ECDSA_CERT01:
-        case SSH_KEYTYPE_SK_ED25519:
-        case SSH_KEYTYPE_SK_ED25519_CERT01:
-        case SSH_KEYTYPE_RSA1:
-        case SSH_KEYTYPE_UNKNOWN:
-        default:
             goto error;
+        }
+
+        rc = pki_key_generate_rsa(key, parameter);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+        break;
+#ifdef HAVE_ECC
+    case SSH_KEYTYPE_ECDSA: /* deprecated */
+        rc = pki_key_generate_ecdsa(key, parameter);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+
+        /* Update key type */
+        key->type_c = ssh_pki_key_ecdsa_name(key);
+        break;
+    case SSH_KEYTYPE_ECDSA_P256:
+        rc = pki_key_generate_ecdsa(key, 256);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+        break;
+    case SSH_KEYTYPE_ECDSA_P384:
+        rc = pki_key_generate_ecdsa(key, 384);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+        break;
+    case SSH_KEYTYPE_ECDSA_P521:
+        rc = pki_key_generate_ecdsa(key, 521);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+        break;
+#endif /* HAVE_ECC */
+    case SSH_KEYTYPE_ED25519:
+        rc = pki_key_generate_ed25519(key);
+        if (rc == SSH_ERROR) {
+            goto error;
+        }
+        break;
+    case SSH_KEYTYPE_RSA_CERT01:
+    case SSH_KEYTYPE_ECDSA_P256_CERT01:
+    case SSH_KEYTYPE_ECDSA_P384_CERT01:
+    case SSH_KEYTYPE_ECDSA_P521_CERT01:
+    case SSH_KEYTYPE_ED25519_CERT01:
+    case SSH_KEYTYPE_SK_ECDSA:
+    case SSH_KEYTYPE_SK_ECDSA_CERT01:
+    case SSH_KEYTYPE_SK_ED25519:
+    case SSH_KEYTYPE_SK_ED25519_CERT01:
+    case SSH_KEYTYPE_RSA1:
+    case SSH_KEYTYPE_UNKNOWN:
+    default:
+        goto error;
     }
 
     *pkey = key;

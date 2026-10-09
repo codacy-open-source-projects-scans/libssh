@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <limits.h>
+
 #define LIBSSH_STATIC
 
 #ifndef _WIN32
@@ -48,6 +50,22 @@ extern LIBSSH_THREAD int ssh_log_level;
 #define LIBSSH_TESTCONFIG17 "libssh_testconfig17.tmp"
 #define LIBSSH_TESTCONFIG18 "libssh_testconfig18.tmp"
 #define LIBSSH_TESTCONFIG19 "libssh_testconfig19.tmp"
+#define LIBSSH_TESTCONFIG21 "libssh_testconfig21.tmp"
+#define LIBSSH_TESTCONFIG22 "libssh_testconfig22.tmp"
+#define LIBSSH_TESTCONFIG24 "libssh_testconfig24.tmp"
+#define LIBSSH_TESTCONFIG25 "libssh_testconfig25.tmp"
+/*
+ * The glob pattern below matches 3 or 6 as the last character before .tmp,
+ * so test config filenames ending with 3 or 6 (for example,
+ * libssh_testconfig13.tmp, libssh_testconfig23.tmp) would collide with the
+ * glob include test and will fail. Numbers ending with 3 and 6 are therefore
+ * intentionally skipped when adding new test configuration files.
+ */
+#define LIBSSH_TESTCONFIG27 "libssh_testconfig27.tmp"
+#define LIBSSH_TESTCONFIG28 "libssh_testconfig28.tmp"
+#define LIBSSH_TESTCONFIG30 "libssh_testconfig30.tmp"
+#define LIBSSH_TESTCONFIG31 "libssh_testconfig31.tmp"
+#define LIBSSH_TESTCONFIG34 "libssh_testconfig34.tmp"
 #define LIBSSH_TESTCONFIGGLOB "libssh_testc*[36].tmp"
 #define LIBSSH_TEST_PUBKEYTYPES "libssh_test_PubkeyAcceptedKeyTypes.tmp"
 #define LIBSSH_TEST_PUBKEYALGORITHMS "libssh_test_PubkeyAcceptedAlgorithms.tmp"
@@ -57,6 +75,12 @@ extern LIBSSH_THREAD int ssh_log_level;
 #define LIBSSH_TESTCONFIG_MATCH_COMPLEX "libssh_test_match_complex.tmp"
 #define LIBSSH_TESTCONFIG_LOGLEVEL_MISSING "libssh_test_loglevel_missing.tmp"
 #define LIBSSH_TESTCONFIG_JUMP "libssh_test_jump.tmp"
+#define LIBSSH_TESTCONFIG_NUMERIC_INVALID  "libssh_test_numeric_invalid.tmp"
+#define LIBSSH_TESTCONFIG_TIMEOUT_SUFFIX   "libssh_test_timeout_suffix.tmp"
+#define LIBSSH_TESTCONFIG_BOOLEAN_INVALID  "libssh_test_boolean_invalid.tmp"
+#define LIBSSH_TESTCONFIG_BOOLEAN_COMPAT   "libssh_test_boolean_compat.tmp"
+#define LIBSSH_TESTCONFIG29 "libssh_testconfig29.tmp"
+#define LIBSSH_TESTCONFIG32 "libssh_testconfig32.tmp"
 
 #define LIBSSH_TESTCONFIG_STRING1 \
     "User "USERNAME"\nInclude "LIBSSH_TESTCONFIG2"\n\n"
@@ -103,6 +127,8 @@ extern LIBSSH_THREAD int ssh_log_level;
 #define LIBSSH_TESTCONFIG_STRING8 \
     "Host gss\n" \
     "\tGSSAPIAuthentication yes\n" \
+    "Host challenge\n" \
+    "\tChallengeResponseAuthentication yes\n" \
     "Host kbd\n" \
     "\tKbdInteractiveAuthentication yes\n" \
     "Host pass\n" \
@@ -111,6 +137,8 @@ extern LIBSSH_THREAD int ssh_log_level;
     "\tPubkeyAuthentication yes\n" \
     "Host nogss\n" \
     "\tGSSAPIAuthentication no\n" \
+    "Host nochallenge\n" \
+    "\tChallengeResponseAuthentication no\n" \
     "Host nokbd\n" \
     "\tKbdInteractiveAuthentication no\n" \
     "Host nopass\n" \
@@ -179,6 +207,8 @@ extern LIBSSH_THREAD int ssh_log_level;
     "\tRekeyLimit default none\n" \
     "Host data1\n" \
     "\tRekeyLimit 42G\n" \
+    "Host datatime\n" \
+    "\tRekeyLimit 42G 1h\n" \
     "Host data2\n" \
     "\tRekeyLimit 31M\n" \
     "Host data3\n" \
@@ -246,6 +276,103 @@ extern LIBSSH_THREAD int ssh_log_level;
     "Host batch\n"                 \
     "\tBatchMode yes\n"
 
+#define LIBSSH_TESTCONFIG20 "libssh_testconfig20.tmp"
+#define LIBSSH_TESTCONFIG_STRING20                    \
+    "Host withpref\n"                                 \
+    "\tPreferredAuthentications publickey,password\n" \
+    "Host nopref\n"                                   \
+    "\tHostName example.com\n"
+
+#define LIBSSH_TESTCONFIG_STRING21  \
+    "Host fewprompts\n"             \
+    "\tNumberOfPasswordPrompts 1\n" \
+    "Host defaultprompts\n"         \
+    "\tHostName example.com\n"
+#define LIBSSH_TESTCONFIG_STRING22 \
+    "Host notty\n"                 \
+    "\tRequestTTY no\n"            \
+    "Host ttyyes\n"                \
+    "\tRequestTTY yes\n"           \
+    "Host ttyauto\n"               \
+    "\tRequestTTY auto\n"          \
+    "Host ttyforce\n"              \
+    "\tRequestTTY force\n"
+
+#define LIBSSH_TESTCONFIG_STRING24 \
+    "Host tildeescape\n"           \
+    "\tEscapeChar ~\n"             \
+    "Host ctrlcescape\n"           \
+    "\tEscapeChar ^C\n"            \
+    "Host noescape\n"              \
+    "\tEscapeChar none\n"
+#define LIBSSH_TESTCONFIG_STRING25 \
+    "Host withenv\n"               \
+    "\tSendEnv LANG LC_*\n"        \
+    "\tSendEnv TZ\n"               \
+    "Host noenv\n"                 \
+    "\tHostName example.com\n"     \
+    "Host negenv\n"                \
+    "\tSendEnv LANG LC_*\n"        \
+    "\tSendEnv TZ\n"               \
+    "\tSendEnv -LANG\n"
+
+#define LIBSSH_TESTCONFIG_STRING27                      \
+    "Host withfwd\n"                                    \
+    "\tLocalForward 8080 web:80\n"                      \
+    "\tLocalForward 0.0.0.0:9090 db:3306\n"             \
+    "\tLocalForward /tmp/local.sock /tmp/remote.sock\n" \
+    "Host nofwd\n"                                      \
+    "\tHostName example.com\n"
+
+#define LIBSSH_TESTCONFIG_STRING28                      \
+    "Host withrfwd\n"                                   \
+    "\tRemoteForward 8080 web:80\n"                     \
+    "\tRemoteForward 0.0.0.0:9090 db:3306\n"            \
+    "\tRemoteForward /tmp/remote.sock /tmp/local.sock\n"\
+    "Host norfwd\n"                                     \
+    "\tHostName example.com\n"
+
+#define LIBSSH_TESTCONFIG_STRING29 \
+    "Host exit_fwd_no\n"            \
+    "\tExitOnForwardFailure no\n"   \
+    "Host exit_fwd_yes\n"           \
+    "\tExitOnForwardFailure yes\n"
+
+#define LIBSSH_TESTCONFIG_STRING30 \
+    "Host shortinterval\n"         \
+    "\tServerAliveInterval 10\n"   \
+    "Host longinterval\n"          \
+    "\tServerAliveInterval 300\n"  \
+    "Host defaultinterval\n"       \
+    "\tHostName example.com\n"
+
+#define LIBSSH_TESTCONFIG_STRING31 \
+    "Host lowcount\n"              \
+    "\tServerAliveCountMax 1\n"    \
+    "Host highcount\n"             \
+    "\tServerAliveCountMax 10\n"   \
+    "Host defaultcount\n"          \
+    "\tHostName example.com\n"
+
+#define LIBSSH_TESTCONFIG_STRING32     \
+    "Host fwd_no\n"                    \
+    "\tForwardAgent no\n"              \
+    "Host fwd_yes\n"                   \
+    "\tForwardAgent yes\n"             \
+    "Host fwd_sock\n"                  \
+    "\tForwardAgent /tmp/agent.sock\n" \
+    "Host fwd_env\n"                   \
+    "\tForwardAgent $SSH_AUTH_SOCK\n"  \
+    "Host fwd_true\n"                  \
+    "\tForwardAgent true\n"            \
+    "Host fwd_false\n"                 \
+    "\tForwardAgent false\n"
+#define LIBSSH_TESTCONFIG_STRING34 \
+    "Host nogateway\n"             \
+    "\tGatewayPorts no\n"          \
+    "Host withgateway\n"           \
+    "\tGatewayPorts yes\n"
+
 #define LIBSSH_TEST_PUBKEYTYPES_STRING \
     "PubkeyAcceptedKeyTypes "PUBKEYACCEPTEDTYPES"\n"
 
@@ -289,6 +416,30 @@ extern LIBSSH_THREAD int ssh_log_level;
     "    PasswordAuthentication yes\n" \
     "    LogLevel DEBUG3\n"
 
+#define LIBSSH_TESTCONFIG_IDENTITY_DEFAULT_ONLY \
+   "IdentityFile ~/.ssh/id_rsa\n"
+
+#define LIBSSH_TESTCONFIG_IDENTITY_CUSTOM_ONLY \
+   "IdentityFile ~/.ssh/custom_key\n"
+
+#define LIBSSH_TESTCONFIG_IDENTITY_DUPS \
+   "IdentityFile custom\n" \
+   "IdentityFile default_key\n" \
+   "IdentityFile custom\n" \
+   "IdentityFile ~/.ssh/id_rsa\n" \
+   "IdentityFile default_key\n"
+
+#define LIBSSH_TESTCONFIG_IDENTITY_DEFAULT_DUPS \
+   "IdentityFile ~/.ssh/id_rsa\n" \
+   "IdentityFile ~/.ssh/id_rsa\n"
+
+#define LIBSSH_TESTCONFIG_IDENTITY_MULTIPLE_DEFS \
+   "IdentityFile ~/.ssh/id_rsa\n" \
+   "IdentityFile ~/.ssh/id_ed25519\n"
+
+#define LIBSSH_TESTCONFIG_IDENTITY_CUSTOM_THEN_DEFAULT \
+   "IdentityFile custom\n" \
+   "IdentityFile ~/.ssh/id_rsa\n"
 /**
  * @brief helper function loading configuration from either file or string
  */
@@ -336,6 +487,17 @@ static int setup_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG17);
     unlink(LIBSSH_TESTCONFIG18);
     unlink(LIBSSH_TESTCONFIG19);
+    unlink(LIBSSH_TESTCONFIG21);
+    unlink(LIBSSH_TESTCONFIG22);
+    unlink(LIBSSH_TESTCONFIG24);
+    unlink(LIBSSH_TESTCONFIG25);
+    unlink(LIBSSH_TESTCONFIG27);
+    unlink(LIBSSH_TESTCONFIG28);
+    unlink(LIBSSH_TESTCONFIG29);
+    unlink(LIBSSH_TESTCONFIG30);
+    unlink(LIBSSH_TESTCONFIG31);
+    unlink(LIBSSH_TESTCONFIG32);
+    unlink(LIBSSH_TESTCONFIG34);
     unlink(LIBSSH_TEST_PUBKEYTYPES);
     unlink(LIBSSH_TEST_PUBKEYALGORITHMS);
     unlink(LIBSSH_TEST_NONEWLINEEND);
@@ -343,6 +505,11 @@ static int setup_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG_MATCH_COMPLEX);
     unlink(LIBSSH_TESTCONFIG_LOGLEVEL_MISSING);
     unlink(LIBSSH_TESTCONFIG_JUMP);
+    unlink(LIBSSH_TESTCONFIG_NUMERIC_INVALID);
+    unlink(LIBSSH_TESTCONFIG_TIMEOUT_SUFFIX);
+    unlink(LIBSSH_TESTCONFIG_BOOLEAN_INVALID);
+    unlink(LIBSSH_TESTCONFIG_BOOLEAN_COMPAT);
+    unlink(LIBSSH_TESTCONFIG20);
 
     torture_write_file(LIBSSH_TESTCONFIG1,
                        LIBSSH_TESTCONFIG_STRING1);
@@ -402,6 +569,40 @@ static int setup_config_files(void **state)
     torture_write_file(LIBSSH_TESTCONFIG19,
                        LIBSSH_TESTCONFIG_STRING19);
 
+    /* NumberOfPasswordPrompts */
+    torture_write_file(LIBSSH_TESTCONFIG21,
+                       LIBSSH_TESTCONFIG_STRING21);
+    /* RequestTTY */
+    torture_write_file(LIBSSH_TESTCONFIG22,
+                       LIBSSH_TESTCONFIG_STRING22);
+    /* EscapeChar */
+    torture_write_file(LIBSSH_TESTCONFIG24,
+                       LIBSSH_TESTCONFIG_STRING24);
+    /* ServerAliveInterval */
+    torture_write_file(LIBSSH_TESTCONFIG30,
+                       LIBSSH_TESTCONFIG_STRING30);
+    /* ServerAliveCountMax */
+    torture_write_file(LIBSSH_TESTCONFIG31,
+                       LIBSSH_TESTCONFIG_STRING31);
+    /* LocalForward */
+    torture_write_file(LIBSSH_TESTCONFIG27,
+                       LIBSSH_TESTCONFIG_STRING27);
+    /* RemoteForward */
+    torture_write_file(LIBSSH_TESTCONFIG28,
+                       LIBSSH_TESTCONFIG_STRING28);
+    /* ExitOnForwardFailure */
+    torture_write_file(LIBSSH_TESTCONFIG29,
+                       LIBSSH_TESTCONFIG_STRING29);
+    /* ForwardAgent */
+    torture_write_file(LIBSSH_TESTCONFIG32,
+                       LIBSSH_TESTCONFIG_STRING32);
+    /* GatewayPorts */
+    torture_write_file(LIBSSH_TESTCONFIG34,
+                       LIBSSH_TESTCONFIG_STRING34);
+    /* SendEnv */
+    torture_write_file(LIBSSH_TESTCONFIG25,
+                       LIBSSH_TESTCONFIG_STRING25);
+
     torture_write_file(LIBSSH_TEST_PUBKEYTYPES,
                        LIBSSH_TEST_PUBKEYTYPES_STRING);
 
@@ -421,6 +622,10 @@ static int setup_config_files(void **state)
                        LIBSSH_TESTCONFIG_LOGLEVEL_MISSING_STRING);
     torture_write_file(LIBSSH_TESTCONFIG_JUMP,
                        LIBSSH_TESTCONFIG_JUMP_STRING);
+
+    /* PreferredAuthentications */
+    torture_write_file(LIBSSH_TESTCONFIG20,
+                       LIBSSH_TESTCONFIG_STRING20);
 
     return 0;
 }
@@ -447,6 +652,17 @@ static int teardown_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG17);
     unlink(LIBSSH_TESTCONFIG18);
     unlink(LIBSSH_TESTCONFIG19);
+    unlink(LIBSSH_TESTCONFIG21);
+    unlink(LIBSSH_TESTCONFIG22);
+    unlink(LIBSSH_TESTCONFIG24);
+    unlink(LIBSSH_TESTCONFIG25);
+    unlink(LIBSSH_TESTCONFIG27);
+    unlink(LIBSSH_TESTCONFIG28);
+    unlink(LIBSSH_TESTCONFIG29);
+    unlink(LIBSSH_TESTCONFIG30);
+    unlink(LIBSSH_TESTCONFIG31);
+    unlink(LIBSSH_TESTCONFIG32);
+    unlink(LIBSSH_TESTCONFIG34);
     unlink(LIBSSH_TEST_PUBKEYTYPES);
     unlink(LIBSSH_TEST_PUBKEYALGORITHMS);
     unlink(LIBSSH_TEST_NONEWLINEEND);
@@ -454,6 +670,11 @@ static int teardown_config_files(void **state)
     unlink(LIBSSH_TESTCONFIG_MATCH_COMPLEX);
     unlink(LIBSSH_TESTCONFIG_LOGLEVEL_MISSING);
     unlink(LIBSSH_TESTCONFIG_JUMP);
+    unlink(LIBSSH_TESTCONFIG_NUMERIC_INVALID);
+    unlink(LIBSSH_TESTCONFIG_TIMEOUT_SUFFIX);
+    unlink(LIBSSH_TESTCONFIG_BOOLEAN_INVALID);
+    unlink(LIBSSH_TESTCONFIG_BOOLEAN_COMPAT);
+    unlink(LIBSSH_TESTCONFIG20);
 
     return 0;
 }
@@ -725,6 +946,10 @@ static void torture_config_auth_methods(void **state,
     assert_false(session->opts.flags & SSH_OPT_FLAG_GSSAPI_AUTH);
     assert_true(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
 
+    ssh_options_set(session, SSH_OPTIONS_HOST, "nochallenge");
+    _parse_config(session, file, string, SSH_OK);
+    assert_false(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
+
     ssh_options_set(session, SSH_OPTIONS_HOST, "nokbd");
     _parse_config(session, file, string, SSH_OK);
     assert_false(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
@@ -746,6 +971,10 @@ static void torture_config_auth_methods(void **state,
     _parse_config(session, file, string, SSH_OK);
     assert_true(session->opts.flags & SSH_OPT_FLAG_GSSAPI_AUTH);
     assert_false(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
+
+    ssh_options_set(session, SSH_OPTIONS_HOST, "challenge");
+    _parse_config(session, file, string, SSH_OK);
+    assert_true(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
 
     ssh_options_set(session, SSH_OPTIONS_HOST, "kbd");
     _parse_config(session, file, string, SSH_OK);
@@ -778,6 +1007,393 @@ static void torture_config_auth_methods_string(void **state)
     torture_config_auth_methods(state, NULL, LIBSSH_TESTCONFIG_STRING8);
 }
 
+static void torture_config_numeric_invalid(void **state, const char *file)
+{
+    ssh_session session = *state;
+    struct invalid_numeric_case {
+        const char *config;
+        enum {
+            INVALID_NUMERIC_PORT,
+            INVALID_NUMERIC_TIMEOUT,
+            INVALID_NUMERIC_RSA_SIZE,
+        } kind;
+    } configs[] = {
+        {
+            "Host test\n"
+            "\tPort 2201abc\n",
+            INVALID_NUMERIC_PORT,
+        },
+        {
+            "Host test\n"
+            "\tPort 70000\n",
+            INVALID_NUMERIC_PORT,
+        },
+        {
+            "Host test\n"
+            "\tConnectTimeout 30abc\n",
+            INVALID_NUMERIC_TIMEOUT,
+        },
+        {
+            "Host test\n"
+            "\tConnectTimeout 30x\n",
+            INVALID_NUMERIC_TIMEOUT,
+        },
+        {
+            "Host test\n"
+            "\tConnectTimeout 3550w5d3h14m8s\n",
+            INVALID_NUMERIC_TIMEOUT,
+        },
+        {
+            "Host test\n"
+            "\tRequiredRSASize 2233abc\n",
+            INVALID_NUMERIC_RSA_SIZE,
+        },
+    };
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(configs); i++) {
+        const char *config = configs[i].config;
+
+        torture_reset_config(session);
+        session->opts.port = 2222;
+        session->opts.timeout = 15;
+        session->opts.rsa_min_size = 2048;
+        ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+
+        switch (configs[i].kind) {
+        case INVALID_NUMERIC_PORT:
+            assert_int_equal(session->opts.port, 2222);
+            break;
+        case INVALID_NUMERIC_TIMEOUT:
+            assert_int_equal(session->opts.timeout, 15);
+            break;
+        case INVALID_NUMERIC_RSA_SIZE:
+            assert_int_equal(session->opts.rsa_min_size, 2048);
+            break;
+        }
+    }
+}
+
+static void torture_config_numeric_invalid_file(void **state)
+{
+    torture_config_numeric_invalid(state, LIBSSH_TESTCONFIG_NUMERIC_INVALID);
+}
+
+static void torture_config_numeric_invalid_string(void **state)
+{
+    torture_config_numeric_invalid(state, NULL);
+}
+
+static void torture_config_timeout_suffix(void **state, const char *file)
+{
+    ssh_session session = *state;
+    struct timeout_case {
+        const char *host;
+        const char *value;
+        long expected;
+        bool infinite;
+    } cases[] = {
+        {"seconds", "30s", 30, false},
+        {"seconds_upper", "30S", 30, false},
+        {"minutes", "1m", 60, false},
+        {"minutes_upper", "1M", 60, false},
+        {"days", "30d", 30L * 24 * 60 * 60, false},
+        {"days_upper", "1D", 24L * 60 * 60, false},
+        {"weeks_upper", "1W", 7L * 24 * 60 * 60, false},
+        {"int_max", "3550w5d3h14m7s", INT_MAX, false},
+        {"repeat_s", "30s30s", 60, false},
+        {"repeat_h", "1h1h", 7200, false},
+        {"compound", "1h30m", 5400, false},
+        {"compound_upper", "1H30M", 5400, false},
+        {"none", "none", 0, true},
+    };
+    char config[256];
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(cases); i++) {
+        torture_reset_config(session);
+        ssh_options_set(session, SSH_OPTIONS_HOST, cases[i].host);
+        snprintf(config,
+                 sizeof(config),
+                 "Host %s\n\tConnectTimeout %s\n",
+                 cases[i].host,
+                 cases[i].value);
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+        if (cases[i].infinite) {
+            assert_int_equal(session->opts.timeout,
+                             (unsigned long)SSH_TIMEOUT_INFINITE);
+            assert_int_equal(session->opts.timeout_usec, 0);
+        } else {
+            assert_int_equal(session->opts.timeout, cases[i].expected);
+        }
+    }
+}
+
+static void torture_config_timeout_suffix_file(void **state)
+{
+    torture_config_timeout_suffix(state, LIBSSH_TESTCONFIG_TIMEOUT_SUFFIX);
+}
+
+static void torture_config_timeout_suffix_string(void **state)
+{
+    torture_config_timeout_suffix(state, NULL);
+}
+
+static void torture_config_reset_boolean_state(ssh_session session)
+{
+    torture_reset_config(session);
+    session->opts.StrictHostKeyChecking = SSH_STRICT_HOSTKEY_ASK;
+    session->opts.gss_delegate_creds = 0;
+    session->opts.flags = SSH_OPT_FLAG_PASSWORD_AUTH |
+                          SSH_OPT_FLAG_PUBKEY_AUTH | SSH_OPT_FLAG_KBDINT_AUTH |
+                          SSH_OPT_FLAG_GSSAPI_AUTH;
+    session->opts.pubkey_auth = SSH_PUBKEY_AUTH_ALL;
+    session->opts.identities_only = false;
+}
+
+static void torture_config_boolean_invalid(void **state, const char *file)
+{
+    ssh_session session = *state;
+    struct invalid_boolean_case {
+        const char *config;
+        enum {
+            INVALID_COMPRESSION,
+            INVALID_IDENTITIES_ONLY,
+            INVALID_GSSAPI_KEY_EXCHANGE,
+            INVALID_GSSAPI_AUTH,
+            INVALID_KBDINT_AUTH,
+            INVALID_PASSWORD_AUTH,
+            INVALID_PUBKEY_AUTH,
+        } kind;
+    } configs[] = {
+        {
+            "Host test\n"
+            "\tCompression yesplease\n",
+            INVALID_COMPRESSION,
+        },
+        {
+            "Host test\n"
+            "\tCompression true\n",
+            INVALID_COMPRESSION,
+        },
+#ifndef WITH_ZLIB
+        {
+            "Host test\n"
+            "\tCompression yes\n",
+            INVALID_COMPRESSION,
+        },
+#endif /* WITH_ZLIB */
+        {
+            "Host test\n"
+            "\tIdentitiesOnly nope\n",
+            INVALID_IDENTITIES_ONLY,
+        },
+        {
+            "Host test\n"
+            "\tGSSAPIKeyExchange yesplease\n",
+            INVALID_GSSAPI_KEY_EXCHANGE,
+        },
+        {
+            "Host test\n"
+            "\tGSSAPIAuthentication\n",
+            INVALID_GSSAPI_AUTH,
+        },
+        {
+            "Host test\n"
+            "\tKbdInteractiveAuthentication\n",
+            INVALID_KBDINT_AUTH,
+        },
+        {
+            "Host test\n"
+            "\tPasswordAuthentication\n",
+            INVALID_PASSWORD_AUTH,
+        },
+        {
+            "Host test\n"
+            "\tPubkeyAuthentication\n",
+            INVALID_PUBKEY_AUTH,
+        },
+    };
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(configs); i++) {
+        const char *config = configs[i].config;
+
+        torture_config_reset_boolean_state(session);
+        /* These invalid-value cases should behave as no-ops for the fields
+         * exercised only by this test.
+         */
+        SAFE_FREE(session->opts.wanted_methods[SSH_COMP_C_S]);
+        SAFE_FREE(session->opts.wanted_methods[SSH_COMP_S_C]);
+        session->opts.gssapi_key_exchange = false;
+        ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+
+        switch (configs[i].kind) {
+        case INVALID_COMPRESSION:
+            assert_null(session->opts.wanted_methods[SSH_COMP_C_S]);
+            assert_null(session->opts.wanted_methods[SSH_COMP_S_C]);
+            break;
+        case INVALID_IDENTITIES_ONLY:
+            assert_false(session->opts.identities_only);
+            break;
+        case INVALID_GSSAPI_KEY_EXCHANGE:
+            assert_false(session->opts.gssapi_key_exchange);
+            break;
+        case INVALID_GSSAPI_AUTH:
+            assert_true(session->opts.flags & SSH_OPT_FLAG_GSSAPI_AUTH);
+            break;
+        case INVALID_KBDINT_AUTH:
+            assert_true(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
+            break;
+        case INVALID_PASSWORD_AUTH:
+            assert_true(session->opts.flags & SSH_OPT_FLAG_PASSWORD_AUTH);
+            break;
+        case INVALID_PUBKEY_AUTH:
+            assert_true(session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH);
+            assert_int_equal(session->opts.pubkey_auth, SSH_PUBKEY_AUTH_ALL);
+            break;
+        }
+    }
+}
+
+static void torture_config_boolean_invalid_file(void **state)
+{
+    torture_config_boolean_invalid(state, LIBSSH_TESTCONFIG_BOOLEAN_INVALID);
+}
+
+static void torture_config_boolean_invalid_string(void **state)
+{
+    torture_config_boolean_invalid(state, NULL);
+}
+
+static void torture_config_boolean_compat(void **state, const char *file)
+{
+    ssh_session session = *state;
+    char config[256];
+    size_t i;
+    struct strict_hostkey_case {
+        const char *value;
+        int expected;
+    } strict_cases[] = {
+        {"true", SSH_STRICT_HOSTKEY_YES},
+        {"false", SSH_STRICT_HOSTKEY_OFF},
+        {"ask", SSH_STRICT_HOSTKEY_ASK},
+        {"accept-new", SSH_STRICT_HOSTKEY_ACCEPT_NEW},
+        {"off", SSH_STRICT_HOSTKEY_OFF},
+    };
+    struct pubkey_auth_case {
+        const char *value;
+        int expected;
+        bool enabled;
+    } pubkey_cases[] = {
+        {"true", SSH_PUBKEY_AUTH_ALL, true},
+        {"false", SSH_PUBKEY_AUTH_NO, false},
+        {"unbound", SSH_PUBKEY_AUTH_UNBOUND, true},
+        {"host-bound", SSH_PUBKEY_AUTH_HOST_BOUND, true},
+    };
+    struct gssapi_key_exchange_case {
+        const char *value;
+        bool expected;
+    } gssapi_key_exchange_cases[] = {
+        {"true", true},
+        {"false", false},
+    };
+
+    for (i = 0; i < ARRAY_SIZE(strict_cases); i++) {
+        torture_config_reset_boolean_state(session);
+        ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+        snprintf(config,
+                 sizeof(config),
+                 "Host test\n\tStrictHostKeyChecking %s\n",
+                 strict_cases[i].value);
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+        assert_int_equal(session->opts.StrictHostKeyChecking,
+                         strict_cases[i].expected);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(pubkey_cases); i++) {
+        torture_config_reset_boolean_state(session);
+        ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+        snprintf(config,
+                 sizeof(config),
+                 "Host test\n\tPubkeyAuthentication %s\n",
+                 pubkey_cases[i].value);
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+        assert_int_equal(session->opts.pubkey_auth, pubkey_cases[i].expected);
+        assert_int_equal((session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH) != 0,
+                         pubkey_cases[i].enabled);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(gssapi_key_exchange_cases); i++) {
+        torture_config_reset_boolean_state(session);
+        session->opts.gssapi_key_exchange =
+            !gssapi_key_exchange_cases[i].expected;
+        ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+        snprintf(config,
+                 sizeof(config),
+                 "Host test\n\tGSSAPIKeyExchange %s\n",
+                 gssapi_key_exchange_cases[i].value);
+        if (file != NULL) {
+            torture_write_file(file, config);
+        }
+        _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+#ifdef WITH_GSSAPI
+        assert_int_equal(session->opts.gssapi_key_exchange,
+                         gssapi_key_exchange_cases[i].expected);
+#else
+        assert_int_equal(session->opts.gssapi_key_exchange,
+                         !gssapi_key_exchange_cases[i].expected);
+#endif
+    }
+
+    torture_config_reset_boolean_state(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "test");
+    snprintf(config,
+             sizeof(config),
+             "Host test\n"
+             "\tPasswordAuthentication true\n"
+             "\tKbdInteractiveAuthentication false\n"
+             "\tGSSAPIAuthentication true\n"
+             "\tGSSAPIDelegateCredentials true\n"
+             "\tIdentitiesOnly false\n");
+    if (file != NULL) {
+        torture_write_file(file, config);
+    }
+    _parse_config(session, file, file != NULL ? NULL : config, SSH_OK);
+    assert_true(session->opts.flags & SSH_OPT_FLAG_PASSWORD_AUTH);
+    assert_false(session->opts.flags & SSH_OPT_FLAG_KBDINT_AUTH);
+    assert_true(session->opts.flags & SSH_OPT_FLAG_GSSAPI_AUTH);
+    assert_int_equal(session->opts.gss_delegate_creds, 1);
+    assert_false(session->opts.identities_only);
+}
+
+static void torture_config_boolean_compat_file(void **state)
+{
+    torture_config_boolean_compat(state, LIBSSH_TESTCONFIG_BOOLEAN_COMPAT);
+}
+
+static void torture_config_boolean_compat_string(void **state)
+{
+    torture_config_boolean_compat(state, NULL);
+}
+
 /**
  * @brief Helper for checking hostname, username and port of ssh_jump_info_struct
  */
@@ -802,7 +1418,9 @@ helper_proxy_jump_check(struct ssh_iterator *jump,
         int iport = strtol(port, NULL, 10);
         assert_int_equal(jis->port, iport);
     } else {
-        assert_int_equal(jis->port, 22);
+        /* No port in the ProxyJump spec: left unset for the jump host's own
+         * configuration to supply. */
+        assert_int_equal(jis->port, 0);
     }
 }
 
@@ -879,13 +1497,13 @@ static void torture_config_match(void **state,
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "example1");
     _parse_config(session, file, string, SSH_OK);
-    assert_string_equal(session->opts.host, "examplen");
+    assert_string_equal(session->opts.host, "exampleN");
     assert_string_equal(session->opts.originalhost, "example1");
 
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "example2");
     _parse_config(session, file, string, SSH_OK);
-    assert_string_equal(session->opts.host, "examplen");
+    assert_string_equal(session->opts.host, "exampleN");
     assert_string_equal(session->opts.originalhost, "example2");
 
     /* We can match by originalhost */
@@ -1173,6 +1791,24 @@ static void torture_config_match(void **state,
 #else
     assert_string_equal(session->opts.host, "execed-arguments.com");
 #endif
+
+    config = "Match exec \"test %n = my-alias\"\n"
+             "\tHostName execed-originalhost.com\n";
+    if (file != NULL) {
+        torture_write_file(file, config);
+    } else {
+        string = config;
+    }
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session, file, string, SSH_OK);
+#ifndef WITH_EXEC
+    /* The match exec is not supported on windows at this moment */
+    assert_string_equal(session->opts.host, "my-alias");
+#else
+    assert_string_equal(session->opts.host, "execed-originalhost.com");
+#endif
+    assert_string_equal(session->opts.originalhost, "my-alias");
 
     /* Try to create some invalid configurations */
     /* Missing argument to Match*/
@@ -1991,11 +2627,747 @@ static void torture_config_batch_mode_string(void **state)
 }
 
 /**
+ * @brief Verify we can parse PreferredAuthentications config option
+ */
+static void torture_config_preferred_authentications(void **state,
+                                                     const char *file,
+                                                     const char *string)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc;
+
+    /* Host without PreferredAuthentications then option should be NULL */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "nopref");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_int_equal(rc, SSH_ERROR);
+    assert_null(value);
+
+    /* Host that has PreferredAuthentications set */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "withpref");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "publickey,password");
+    ssh_string_free_char(value);
+    value = NULL;
+}
+
+static void torture_config_preferred_authentications_string(void **state)
+{
+    torture_config_preferred_authentications(state,
+                                             NULL,
+                                             LIBSSH_TESTCONFIG_STRING20);
+}
+
+static void torture_config_preferred_authentications_file(void **state)
+{
+    torture_config_preferred_authentications(state,
+                                             LIBSSH_TESTCONFIG20,
+                                             NULL);
+}
+
+/**
  * @brief Verify we can parse BatchMode configuration option from file
  */
 static void torture_config_batch_mode_file(void **state)
 {
     torture_config_batch_mode(state, LIBSSH_TESTCONFIG19, NULL);
+}
+
+/**
+ * @brief Verify we can parse ExitOnForwardFailure configuration option
+ */
+static void torture_config_exit_on_forward_failure(void **state,
+                                                   const char *file,
+                                                   const char *string)
+{
+    ssh_session session = *state;
+
+    int exit_on_forward_failure = -1;
+    int rc = SSH_OK;
+
+    /* ExitOnForwardFailure no: exit_on_forward_failure should be 0 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "exit_fwd_no");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &exit_on_forward_failure);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(exit_on_forward_failure, 0);
+
+    /* ExitOnForwardFailure yes: exit_on_forward_failure should be 1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "exit_fwd_yes");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &exit_on_forward_failure);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(exit_on_forward_failure, 1);
+}
+
+/**
+ * @brief Verify we can parse ExitOnForwardFailure configuration option from string
+ */
+static void torture_config_exit_on_forward_failure_string(void **state)
+{
+    torture_config_exit_on_forward_failure(state, NULL, LIBSSH_TESTCONFIG_STRING29);
+}
+
+/**
+ * @brief Verify we can parse ExitOnForwardFailure configuration option from file
+ */
+static void torture_config_exit_on_forward_failure_file(void **state)
+{
+    torture_config_exit_on_forward_failure(state, LIBSSH_TESTCONFIG29, NULL);
+}
+
+/**
+ * @brief Verify we can parse GatewayPorts configuration option
+ */
+static void torture_config_gateway_ports(void **state,
+                                         const char *file,
+                                         const char *string)
+{
+    ssh_session session = *state;
+
+    int gateway_ports = -1;
+    int rc = SSH_OK;
+
+    /* GatewayPorts no: gateway_ports should be 0 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "nogateway");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GATEWAY_PORTS, &gateway_ports);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(gateway_ports, 0);
+
+    /* GatewayPorts yes: gateway_ports should be 1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "withgateway");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GATEWAY_PORTS, &gateway_ports);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(gateway_ports, 1);
+}
+
+/**
+ * @brief Verify we can parse GatewayPorts configuration option from string
+ */
+static void torture_config_gateway_ports_string(void **state)
+{
+    torture_config_gateway_ports(state, NULL, LIBSSH_TESTCONFIG_STRING34);
+}
+
+/**
+ * @brief Verify we can parse GatewayPorts configuration option from file
+ */
+static void torture_config_gateway_ports_file(void **state)
+{
+    torture_config_gateway_ports(state, LIBSSH_TESTCONFIG34, NULL);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveInterval configuration option
+ */
+static void torture_config_server_alive_interval(void **state,
+                                                 const char *file,
+                                                 const char *string)
+{
+    ssh_session session = *state;
+
+    int interval = -1;
+    int rc;
+
+    /* Host with ServerAliveInterval 10: interval should be 10 */
+    torture_reset_config(session);
+    session->opts.server_alive_interval = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "shortinterval");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_INTERVAL,
+                             &interval);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(interval, 10);
+
+    /* Host with ServerAliveInterval 300: interval should be 300 */
+    torture_reset_config(session);
+    session->opts.server_alive_interval = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "longinterval");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_INTERVAL,
+                             &interval);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(interval, 300);
+
+    /* Host without ServerAliveInterval: interval should remain 0 */
+    torture_reset_config(session);
+    session->opts.server_alive_interval = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "defaultinterval");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_INTERVAL,
+                             &interval);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(interval, 0);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveInterval from string
+ */
+static void torture_config_server_alive_interval_string(void **state)
+{
+    torture_config_server_alive_interval(state,
+                                         NULL,
+                                         LIBSSH_TESTCONFIG_STRING30);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveInterval from file
+ */
+static void torture_config_server_alive_interval_file(void **state)
+{
+    torture_config_server_alive_interval(state,
+                                         LIBSSH_TESTCONFIG30,
+                                         NULL);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveCountMax configuration option
+ */
+static void torture_config_server_alive_count_max(void **state,
+                                                   const char *file,
+                                                   const char *string)
+{
+    ssh_session session = *state;
+
+    int count_max = -1;
+    int rc;
+
+    /* Host with ServerAliveCountMax 1: count_max should be 1 */
+    torture_reset_config(session);
+    session->opts.server_alive_count_max = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "lowcount");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &count_max);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(count_max, 1);
+
+    /* Host with ServerAliveCountMax 10: count_max should be 10 */
+    torture_reset_config(session);
+    session->opts.server_alive_count_max = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "highcount");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &count_max);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(count_max, 10);
+
+    /* Host without ServerAliveCountMax: count_max should remain 0 */
+    torture_reset_config(session);
+    session->opts.server_alive_count_max = 0;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "defaultcount");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &count_max);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(count_max, 0);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveCountMax from string
+ */
+static void torture_config_server_alive_count_max_string(void **state)
+{
+    torture_config_server_alive_count_max(state,
+                                          NULL,
+                                          LIBSSH_TESTCONFIG_STRING31);
+}
+
+/**
+ * @brief Verify we can parse ServerAliveCountMax from file
+ */
+static void torture_config_server_alive_count_max_file(void **state)
+{
+    torture_config_server_alive_count_max(state,
+                                          LIBSSH_TESTCONFIG31,
+                                          NULL);
+}
+
+/**
+ * @brief Verify we can parse ForwardAgent configuration option
+ */
+static void torture_config_forward_agent(void **state,
+                                         const char *file,
+                                         const char *string)
+{
+    ssh_session session = *state;
+
+    int forward_agent = -1;
+    char *sock_path = NULL;
+    int rc = SSH_OK;
+
+    /* ForwardAgent no: forward_agent should be 0 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_no");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 0);
+
+    /* ForwardAgent yes: forward_agent should be 1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_yes");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 1);
+
+    /* ForwardAgent /tmp/agent.sock: forwarding enabled and socket path stored */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_sock");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 1);
+    rc = ssh_options_get(session, SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH, &sock_path);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(sock_path, "/tmp/agent.sock");
+    ssh_string_free_char(sock_path);
+    sock_path = NULL;
+
+    /* ForwardAgent $SSH_AUTH_SOCK: enabled and the literal $VAR stored */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_env");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 1);
+    rc = ssh_options_get(session, SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH, &sock_path);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(sock_path, "$SSH_AUTH_SOCK");
+    ssh_string_free_char(sock_path);
+    sock_path = NULL;
+
+    /* ForwardAgent true: forward_agent should be 1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_true");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 1);
+
+    /* ForwardAgent false: forward_agent should be 0 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fwd_false");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &forward_agent);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(forward_agent, 0);
+}
+
+/**
+ * @brief Verify we can parse ForwardAgent configuration option from string
+ */
+static void torture_config_forward_agent_string(void **state)
+{
+    torture_config_forward_agent(state, NULL, LIBSSH_TESTCONFIG_STRING32);
+}
+
+/**
+ * @brief Verify we can parse ForwardAgent configuration option from file
+ */
+static void torture_config_forward_agent_file(void **state)
+{
+    torture_config_forward_agent(state, LIBSSH_TESTCONFIG32, NULL);
+}
+
+/**
+ * @brief Verify we can parse NumberOfPasswordPrompts configuration option
+ */
+static void torture_config_number_of_password_prompts(void **state,
+                                                      const char *file,
+                                                      const char *string)
+{
+    ssh_session session = *state;
+    int result = -1;
+    int rc = 0;
+
+    /* Host with NumberOfPasswordPrompts set */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "fewprompts");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* Host without the directive it should remain 0*/
+    memset(&session->opts.number_of_password_prompts, 0,
+           sizeof(session->opts.number_of_password_prompts));
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "defaultprompts");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+}
+
+static void torture_config_number_of_password_prompts_string(void **state)
+{
+    torture_config_number_of_password_prompts(state,
+                                              NULL,
+                                              LIBSSH_TESTCONFIG_STRING21);
+}
+
+static void torture_config_number_of_password_prompts_file(void **state)
+{
+    torture_config_number_of_password_prompts(state,
+                                              LIBSSH_TESTCONFIG21,
+                                              NULL);
+}
+
+/**
+* @brief Verify we can parse RequestTTY configuration option
+ */
+static void torture_config_request_tty(void **state,
+                                       const char *file,
+                                       const char *string)
+{
+    ssh_session session = *state;
+    int request_tty = -1;
+    int rc = 0;
+
+    /* RequestTTY no: request_tty should be SSH_REQUEST_TTY_NO */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "notty");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &request_tty);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(request_tty, SSH_REQUEST_TTY_NO);
+
+    /* RequestTTY yes: request_tty should be SSH_REQUEST_TTY_YES */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "ttyyes");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &request_tty);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(request_tty, SSH_REQUEST_TTY_YES);
+
+    /* RequestTTY auto: request_tty should be SSH_REQUEST_TTY_AUTO */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "ttyauto");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &request_tty);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(request_tty, SSH_REQUEST_TTY_AUTO);
+
+    /* RequestTTY force: request_tty should be SSH_REQUEST_TTY_FORCE */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "ttyforce");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &request_tty);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(request_tty, SSH_REQUEST_TTY_FORCE);
+}
+
+/**
+ * @brief Verify we can parse RequestTTY configuration option from string
+ */
+static void torture_config_request_tty_string(void **state)
+{
+    torture_config_request_tty(state, NULL, LIBSSH_TESTCONFIG_STRING22);
+}
+
+/**
+ * @brief Verify we can parse RequestTTY configuration option from file
+ */
+static void torture_config_request_tty_file(void **state)
+{
+    torture_config_request_tty(state, LIBSSH_TESTCONFIG22, NULL);
+}
+
+/**
+ * @brief Verify we can parse EscapeChar configuration option
+ */
+static void torture_config_escape_char(void **state,
+                                       const char *file,
+                                       const char *string)
+{
+    ssh_session session = *state;
+    int result = 0;
+    int rc = 0;
+
+    /* EscapeChar ~: escape_char should be '~' */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "tildeescape");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ESCAPE_CHAR, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, '~');
+
+    /* EscapeChar ^C: escape_char should be 3 (Ctrl-C) */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "ctrlcescape");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ESCAPE_CHAR, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 3);
+
+    /* EscapeChar none: escape_char should be -1 */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "noescape");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ESCAPE_CHAR, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, -1);
+}
+
+/**
+ * @brief Verify we can parse EscapeChar configuration option from string
+ */
+static void torture_config_escape_char_string(void **state)
+{
+    torture_config_escape_char(state, NULL, LIBSSH_TESTCONFIG_STRING24);
+}
+
+/**
+ * @brief Verify we can parse EscapeChar configuration option from file
+ */
+static void torture_config_escape_char_file(void **state)
+{
+    torture_config_escape_char(state, LIBSSH_TESTCONFIG24, NULL);
+}
+
+/**
+ * @brief Verify we can parse LocalForward configuration option
+ */
+static void torture_config_local_forward(void **state,
+                                         const char *file,
+                                         const char *string)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc = 0;
+
+    /* Host withfwd: three LocalForward entries should be parsed */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "withfwd");
+    _parse_config(session, file, string, SSH_OK);
+
+    /* First entry: "8080 web:80" */
+    rc = ssh_options_get(session, SSH_OPTIONS_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "8080 web:80");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second entry: "0.0.0.0:9090 db:3306" */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "0.0.0.0:9090 db:3306");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Third entry: "/tmp/local.sock /tmp/remote.sock" (Unix domain socket) */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "/tmp/local.sock /tmp/remote.sock");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Iterator should be exhausted after three entries */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_EOF);
+
+    /* Host nofwd: no LocalForward lines so list should be empty */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "nofwd");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get(session, SSH_OPTIONS_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+}
+
+/**
+ * @brief Verify we can parse LocalForward configuration option from string
+ */
+static void torture_config_local_forward_string(void **state)
+{
+    torture_config_local_forward(state, NULL, LIBSSH_TESTCONFIG_STRING27);
+}
+
+/**
+ * @brief Verify we can parse LocalForward configuration option from file
+ */
+static void torture_config_local_forward_file(void **state)
+{
+    torture_config_local_forward(state, LIBSSH_TESTCONFIG27, NULL);
+}
+
+/**
+ * @brief Verify we can parse RemoteForward configuration option
+ */
+static void torture_config_remote_forward(void **state,
+                                          const char *file,
+                                          const char *string)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc = 0;
+
+    /* Host withrfwd: three RemoteForward entries should be parsed */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "withrfwd");
+    _parse_config(session, file, string, SSH_OK);
+
+    /* First entry: "8080 web:80" */
+    rc = ssh_options_get(session, SSH_OPTIONS_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "8080 web:80");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second entry: "0.0.0.0:9090 db:3306" */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "0.0.0.0:9090 db:3306");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Third entry: "/tmp/remote.sock /tmp/local.sock" (Unix domain socket) */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "/tmp/remote.sock /tmp/local.sock");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Iterator should be exhausted after three entries */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_EOF);
+
+    /* Host norfwd: no RemoteForward lines so list should be empty */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "norfwd");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get(session, SSH_OPTIONS_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+}
+
+/**
+ * @brief Verify we can parse RemoteForward configuration option from string
+ */
+static void torture_config_remote_forward_string(void **state)
+{
+    torture_config_remote_forward(state, NULL, LIBSSH_TESTCONFIG_STRING28);
+}
+
+/**
+ * @brief Verify we can parse RemoteForward configuration option from file
+ */
+static void torture_config_remote_forward_file(void **state)
+{
+    torture_config_remote_forward(state, LIBSSH_TESTCONFIG28, NULL);
+}
+
+/**
+ * @brief Verify we can parse SendEnv configuration option
+ */
+static void torture_config_send_env(void **state,
+                                    const char *file,
+                                    const char *string)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc = 0;
+
+    /* SendEnv LANG LC_* on matching host: three patterns should be stored */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "withenv");
+    _parse_config(session, file, string, SSH_OK);
+
+    /* First pattern: LANG */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LANG");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second pattern: LC_* */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LC_*");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Third pattern: TZ */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "TZ");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* No more patterns: SSH_EOF */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_EOF);
+
+    /* Host without SendEnv: getter will return error */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "noenv");
+    _parse_config(session, file, string, SSH_OK);
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_not_equal(rc, SSH_OK);
+
+    /* SendEnv with negation: -LANG removes LANG, leaving LC_* and TZ */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "negenv");
+    _parse_config(session, file, string, SSH_OK);
+
+    /* First pattern should be LC_* (LANG was removed) */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LC_*");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second pattern: TZ */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "TZ");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* No more patterns */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_EOF);
+}
+
+/**
+ * @brief Verify we can parse SendEnv configuration option from string
+ */
+static void torture_config_send_env_string(void **state)
+{
+    torture_config_send_env(state, NULL, LIBSSH_TESTCONFIG_STRING25);
+}
+
+/**
+ * @brief Verify we can parse SendEnv configuration option from file
+ */
+static void torture_config_send_env_file(void **state)
+{
+    torture_config_send_env(state, LIBSSH_TESTCONFIG25, NULL);
 }
 
 /**
@@ -2079,8 +3451,12 @@ static void torture_config_rekey(void **state,
                                  const char *file, const char *string)
 {
     ssh_session session = *state;
+    const char *config = NULL;
+    const uint64_t previous_rekey_data = 64;
+    const int previous_rekey_time_ms = 42 * 60 * 1000;
 
     /* Default values */
+    torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "default");
     _parse_config(session, file, string, SSH_OK);
     assert_int_equal(session->opts.rekey_data, 0);
@@ -2093,6 +3469,14 @@ static void torture_config_rekey(void **state,
     assert_int_equal(session->opts.rekey_data,
             (uint64_t) 42 * 1024 * 1024 * 1024);
     assert_int_equal(session->opts.rekey_time, 0);
+
+    /* 42 GB, 1h */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "datatime");
+    _parse_config(session, file, string, SSH_OK);
+    assert_int_equal(session->opts.rekey_data,
+                     (uint64_t)42 * 1024 * 1024 * 1024);
+    assert_int_equal(session->opts.rekey_time, 60 * 60 * 1000);
 
     /* 41 MB */
     torture_reset_config(session);
@@ -2143,6 +3527,39 @@ static void torture_config_rekey(void **state,
     assert_int_equal(session->opts.rekey_data, 0);
     assert_int_equal(session->opts.rekey_time, 9600 * 1000);
 
+    config = "Host data-too-small\n"
+             "\tRekeyLimit 1 1h\n";
+    if (file != NULL) {
+        torture_write_file(file, config);
+    } else {
+        string = config;
+    }
+
+    torture_reset_config(session);
+    /* Invalid RekeyLimit values should leave the previous settings untouched.
+     */
+    session->opts.rekey_data = previous_rekey_data;
+    session->opts.rekey_time = previous_rekey_time_ms;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "data-too-small");
+    _parse_config(session, file, string, SSH_OK);
+    assert_int_equal(session->opts.rekey_data, previous_rekey_data);
+    assert_int_equal(session->opts.rekey_time, previous_rekey_time_ms);
+
+    config = "Host data-under-minimum\n"
+             "\tRekeyLimit 15 none\n";
+    if (file != NULL) {
+        torture_write_file(file, config);
+    } else {
+        string = config;
+    }
+
+    torture_reset_config(session);
+    session->opts.rekey_data = 128;
+    session->opts.rekey_time = 21 * 60 * 1000;
+    ssh_options_set(session, SSH_OPTIONS_HOST, "data-under-minimum");
+    _parse_config(session, file, string, SSH_OK);
+    assert_int_equal(session->opts.rekey_data, 128);
+    assert_int_equal(session->opts.rekey_time, 21 * 60 * 1000);
 }
 
 /**
@@ -2161,6 +3578,20 @@ static void torture_config_rekey_file(void **state)
 static void torture_config_rekey_string(void **state)
 {
     torture_config_rekey(state, NULL, LIBSSH_TESTCONFIG_STRING12);
+}
+
+static void torture_config_rekey_cli_optional_time(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    torture_reset_config(session);
+
+    rc = ssh_config_parse_line_cli(session, "RekeyLimit 42G");
+    assert_int_equal(rc, 0);
+    assert_int_equal(session->opts.rekey_data,
+                     (uint64_t)42 * 1024 * 1024 * 1024);
+    assert_int_equal(session->opts.rekey_time, 0);
 }
 
 /**
@@ -2897,16 +4328,16 @@ static void torture_config_parser_get_token(void **state)
     strlcpy(data, "\\\"value with \\\"escaped\\\" quotes\\\"\n", sizeof(data));
     p = data;
     tok = ssh_config_get_token(&p);
-    assert_string_equal(tok, "\\\"value");
+    assert_string_equal(tok, "\"value");
     assert_int_equal(*p, 'w');
     tok = ssh_config_get_token(&p);
     assert_string_equal(tok, "with");
     assert_int_equal(*p, '\\');
     tok = ssh_config_get_token(&p);
-    assert_string_equal(tok, "\\\"escaped\\\"");
+    assert_string_equal(tok, "\"escaped\"");
     assert_int_equal(*p, 'q');
     tok = ssh_config_get_token(&p);
-    assert_string_equal(tok, "quotes\\\"");
+    assert_string_equal(tok, "quotes\"");
     assert_int_equal(*p, '\0');
 }
 
@@ -2965,6 +4396,271 @@ static void torture_config_parser_get_token_info(void **state)
     assert_true(info.found);
     assert_false(info.had_equal);
     assert_true(info.invalid);
+}
+
+static void torture_config_parser_get_yesno(void **state)
+{
+    char *p = NULL;
+    char data[256];
+
+    (void)state;
+
+    strncpy(data, "yes\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), 1);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "NO\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), 0);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "true\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), 1);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "FALSE\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), 0);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "yesplease\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), -1);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "nope\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), -1);
+    assert_int_equal(*p, '\0');
+
+    strncpy(data, "\n", sizeof(data));
+    p = data;
+    assert_int_equal(ssh_config_get_yesno(&p, -1), -1);
+    assert_int_equal(*p, '\0');
+}
+
+static void torture_config_get_path(void **state)
+{
+    char *p = NULL, *tok = NULL;
+    char data[256];
+
+    (void) state;
+
+    /* Normal path */
+    strncpy(data, "  /home/user/.ssh/id_rsa  \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/.ssh/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Path with spaces in double quotes */
+    strncpy(data, " \"/home/user/my keys/id_rsa\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/my keys/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Path with spaces in single quotes */
+    strncpy(data, " '/home/user/my keys/id_rsa' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/my keys/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Escaped spaces */
+    strncpy(data, " /home/user/my\\ keys/id_rsa \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/my keys/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Escaped quotes */
+    strncpy(data, " \"/home/user/\\\"my keys\\\"/id_rsa\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/\"my keys\"/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Unclosed quotes should return NULL */
+    strncpy(data, " \"/home/user/my keys/id_rsa \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_null(tok);
+
+    /* Comments handling */
+    strncpy(data, " /home/user/.ssh/id_rsa # my keys \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/.ssh/id_rsa");
+    assert_int_equal(*p, '#');
+
+    /* Comments inside string */
+    strncpy(data, " \"/home/user/#my keys/id_rsa\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/#my keys/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Missing quote at end of string without newline */
+    strncpy(data, " \"/home/user/my keys/id_rsa", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_null(tok);
+
+    /* Mixed quotes: starting with single, containing double */
+    strncpy(data, " '/home/user/\"my keys\"/id_rsa' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/\"my keys\"/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Mixed quotes: starting with double, containing single */
+    strncpy(data, " \"/home/user/'my keys'/id_rsa\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/home/user/'my keys'/id_rsa");
+    assert_int_equal(*p, '\n');
+
+    /* Empty quotes */
+    strncpy(data, " \"\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "");
+    assert_int_equal(*p, '\n');
+
+    /* Empty single quotes */
+    strncpy(data, " '' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "");
+    assert_int_equal(*p, '\n');
+
+    /* Leading and trailing whitespace with quotes */
+    strncpy(data, "  \t  \"/path/to/key\"  \t  \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/to/key");
+    assert_int_equal(*p, '\n');
+
+    /* Just whitespace and a comment */
+    strncpy(data, "    # just a comment\n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_null(tok);
+    assert_int_equal(*p, '#');
+
+    /* Early exit with newline */
+    strncpy(data, "\n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_null(tok);
+    assert_int_equal(*p, '\n');
+
+    /* Escaped comment character */
+    strncpy(data, " /path/with/\\#/hash \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/\\#/hash");
+    assert_int_equal(*p, '\n');
+
+    /* Multiple paths */
+    strncpy(data, " path1 path2 \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "path1");
+    assert_int_equal(*p, 'p');
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "path2");
+    assert_int_equal(*p, '\n');
+
+    /* Unclosed single quotes */
+    strncpy(data, " '/home/user/my keys/id_rsa \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_null(tok);
+
+    /* Quotes in the middle of a token */
+    strncpy(data, " /path/with/\"quote\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/quote");
+    assert_int_equal(*p, '\n');
+    strncpy(data, " /path/with/'single_quote' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/single_quote");
+    assert_int_equal(*p, '\n');
+
+    /* Escaped single quote */
+    strncpy(data, " /path/with/\\'single_quote\\' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/'single_quote'");
+    assert_int_equal(*p, '\n');
+
+    /* Escaped space inside quotes */
+    strncpy(data, " \"/path/with/\\ /space\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/\\ /space");
+    assert_int_equal(*p, '\n');
+
+    /* Unrecognised escape character (slash) inside quotes */
+    strncpy(data, " \"/path/with/\\/slash\" \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/\\/slash");
+    assert_int_equal(*p, '\n');
+
+    /* No trailing newline, ends with \0 */
+    strncpy(data, "/path/to/key", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/to/key");
+    assert_int_equal(*p, '\0');
+
+    /* Ends with a comment directly after the path (no space, so it's part of the token) */
+    strncpy(data, "/path/to/key#comment", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/to/key#comment");
+    assert_int_equal(*p, '\0');
+
+    /* Ends with a newline directly after the path */
+    strncpy(data, "/path/to/key\n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/to/key");
+    assert_int_equal(*p, '\0');
+
+    /* Multiple spaces between tokens */
+    strncpy(data, "path1  path2\n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "path1");
+    assert_string_equal(p, "path2\n");
+
+    strncpy(data, " '/path/with/\\/slash' \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "/path/with/\\/slash");
+    assert_int_equal(*p, '\n');
+
+    /* Unrecognised escape character outside quotes */
+    strncpy(data, " \\/path/with/backslash \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "\\/path/with/backslash");
+    assert_int_equal(*p, '\n');
+
+    /* Literal escaped backslash */
+    strncpy(data, " C:\\\\path\\\\to\\\\key \n", sizeof(data));
+    p = data;
+    tok = ssh_config_get_path(&p);
+    assert_string_equal(tok, "C:\\path\\to\\key");
+    assert_int_equal(*p, '\n');
 }
 
 /* match_pattern() sanity tests
@@ -3145,6 +4841,69 @@ static void torture_config_identity(void **state)
     cert = it->data;
     assert_string_equal(cert, "id_ecdsa_two-cert.pub");
     /* and that is all */
+    assert_null(it->next);
+}
+
+static void torture_config_identity_override(void **state)
+{
+    struct ssh_iterator *it = NULL;
+    ssh_session session = *state;
+
+    /* Config file with only a default identity */
+    torture_reset_config(session);
+    _parse_config(session, NULL, LIBSSH_TESTCONFIG_IDENTITY_DEFAULT_ONLY, SSH_OK);
+    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+    assert_non_null(it);
+    assert_string_equal(it->data, "~/.ssh/id_rsa");
+    assert_null(it->next);
+
+    /* Config file with only custom identity file */
+    torture_reset_config(session);
+    _parse_config(session, NULL, LIBSSH_TESTCONFIG_IDENTITY_CUSTOM_ONLY, SSH_OK);
+    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+    assert_non_null(it);
+    assert_string_equal(it->data, "~/.ssh/custom_key");
+    assert_null(it->next);
+
+    /* Config file with duplicates (both default and custom) */
+    torture_reset_config(session);
+    _parse_config(session, NULL, LIBSSH_TESTCONFIG_IDENTITY_DUPS, SSH_OK);
+
+    /* The order generated by prepending inside libssh:
+     * 'custom' -> ['custom']
+     * 'default_key' -> ['default_key', 'custom']
+     * 'custom' -> skipped
+     * '~/.ssh/id_rsa' -> ['~/.ssh/id_rsa', 'default_key', 'custom']
+     * 'default_key' -> skipped
+     */
+    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+    assert_non_null(it);
+    assert_string_equal(it->data, "~/.ssh/id_rsa");
+    it = it->next;
+    assert_non_null(it);
+    assert_string_equal(it->data, "default_key");
+    it = it->next;
+    assert_non_null(it);
+    assert_string_equal(it->data, "custom");
+    assert_null(it->next);
+
+    /* Config file with only default duplicates */
+    torture_reset_config(session);
+    _parse_config(session, NULL, LIBSSH_TESTCONFIG_IDENTITY_DEFAULT_DUPS, SSH_OK);
+    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+    assert_non_null(it);
+    assert_string_equal(it->data, "~/.ssh/id_rsa");
+    assert_null(it->next);
+
+    /* Custom overriding Default */
+    torture_reset_config(session);
+    _parse_config(session, NULL, LIBSSH_TESTCONFIG_IDENTITY_CUSTOM_THEN_DEFAULT, SSH_OK);
+    it = ssh_list_get_iterator(session->opts.identity_non_exp);
+    assert_non_null(it);
+    assert_string_equal(it->data, "~/.ssh/id_rsa");
+    it = it->next;
+    assert_non_null(it);
+    assert_string_equal(it->data, "custom");
     assert_null(it->next);
 }
 
@@ -3505,6 +5264,112 @@ static void torture_config_hostname(void **state)
     assert_string_equal(session->opts.host, "192.168.1.1");
     assert_string_equal(session->opts.originalhost, "my_alias");
 
+    /* Hostname expands %h */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    assert_string_equal(session->opts.host, "my-alias");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostname %h.ExAmPlE.CoM\n",
+                  SSH_OK);
+    assert_string_equal(session->opts.host, "my-alias.ExAmPlE.CoM");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    assert_int_equal(ssh_options_apply(session), SSH_OK);
+    assert_string_equal(session->opts.host, "my-alias.example.com");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+
+    /* Hostname %h parses on a fresh session but apply still requires a host */
+    torture_reset_config(session);
+    SAFE_FREE(session->opts.host);
+    SAFE_FREE(session->opts.originalhost);
+    assert_null(session->opts.host);
+    assert_null(session->opts.originalhost);
+    _parse_config(session, NULL, "HostName MiXeD-%h.ExAmPlE.CoM\n", SSH_OK);
+    assert_string_equal(session->opts.config_hostname, "MiXeD-%h.ExAmPlE.CoM");
+    assert_int_equal(ssh_options_apply(session), SSH_ERROR);
+
+    /* Hostname %h uses the current host value, not originalhost */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    SAFE_FREE(session->opts.host);
+    session->opts.host = strdup("192.0.2.1");
+    assert_non_null(session->opts.host);
+    assert_string_equal(session->opts.host, "192.0.2.1");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName %h.example.com\n",
+                  SSH_OK);
+    assert_string_equal(session->opts.host, "192.0.2.1.example.com");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    assert_int_equal(ssh_options_apply(session), SSH_OK);
+    assert_string_equal(session->opts.host, "192.0.2.1.example.com");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+
+    /* Hostname with unsupported tokens is rejected and unknown percent-escape
+     * keys are treated as fatal errors
+     */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName FoO-%p.ExAmPlE.CoM\n",
+                  SSH_ERROR);
+    assert_string_equal(session->opts.host, "my-alias");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    assert_null(session->opts.config_hostname);
+
+    /* Unsupported uppercase escapes are also rejected. */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName FoO-%H.ExAmPlE.CoM\n",
+                  SSH_ERROR);
+    assert_string_equal(session->opts.host, "my-alias");
+    assert_string_equal(session->opts.originalhost, "my-alias");
+    assert_null(session->opts.config_hostname);
+
+    /* Hostname rejects incomplete tokens such as a trailing % */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName foo-%\n",
+                  SSH_ERROR);
+
+    /* Hostname %% is syntactically valid but still must produce a hostname */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session, NULL, "Host my-alias\n\tHostName %%\n", SSH_OK);
+    assert_string_equal(session->opts.host, "%");
+
+    /* Match host sees the resolved HostName during parsing */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName %h.example.com\n"
+                  "Match host my-alias.example.com\n\tPort 2222\n",
+                  SSH_OK);
+    assert_int_equal(session->opts.port, 2222);
+
+#ifndef WITH_EXEC
+    /* Match exec is not supported on Windows at this moment */
+#else
+    /* Match exec expands %h from the resolved HostName during parsing */
+    torture_reset_config(session);
+    ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    _parse_config(session,
+                  NULL,
+                  "Host my-alias\n\tHostName %h.example.com\n"
+                  "Match exec \"test %h = my-alias.example.com\"\n"
+                  "\tPort 2200\n",
+                  SSH_OK);
+    assert_int_equal(session->opts.port, 2200);
+#endif
+
     /* Host keyword compares against originalhost, not the resolved IP */
     torture_reset_config(session);
     ssh_options_set(session, SSH_OPTIONS_HOST, "ssh-host");
@@ -3534,6 +5399,8 @@ static void torture_config_hostname(void **state)
                   NULL,
                   "Host my_host\n\tHostname LOCALHOST\n",
                   SSH_OK);
+    assert_string_equal(session->opts.host, "LOCALHOST");
+    assert_int_equal(ssh_options_apply(session), SSH_OK);
     assert_string_equal(session->opts.host, "localhost");
 }
 
@@ -3571,6 +5438,21 @@ static void torture_config_boolean_aliases(void **state)
     assert_int_equal(session->opts.StrictHostKeyChecking, 1);
 }
 
+static void torture_config_hostname_scan_null(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+    bool needs_host = true;
+
+    rc = ssh_config_scan_hostname_tokens(session,
+                                         NULL,
+                                         &needs_host);
+    assert_int_equal(rc, -1);
+    assert_false(needs_host);
+    assert_string_equal(ssh_get_error(session),
+                        "Cannot scan HostName tokens from NULL input");
+}
+
 /* Invalid configuration files
  */
 static void torture_config_invalid(void **state)
@@ -3586,6 +5468,128 @@ static void torture_config_invalid(void **state)
     /* huge file -- ignored (or missing on non-unix) so OK */
     _parse_config(session, "/proc/kcore", NULL, SSH_OK);
 #endif
+}
+
+/* Issue #365: a value set via ssh_options_set() before config parsing must
+ * NOT be overridden by the config file. */
+static void torture_config_user_not_overridden(void **state)
+{
+    ssh_session session = *state;
+    char *user = NULL;
+    int rc;
+
+    rc = ssh_options_set(session, SSH_OPTIONS_USER, "appuser");
+    assert_ssh_return_code(session, rc);
+
+    _parse_config(session, NULL, "User configuser\n", SSH_OK);
+
+    rc = ssh_options_get(session, SSH_OPTIONS_USER, &user);
+    assert_ssh_return_code(session, rc);
+    assert_non_null(user);
+    assert_string_equal(user, "appuser");
+    SSH_STRING_FREE_CHAR(user);
+}
+
+/* When the application did NOT set User, the config value still applies. */
+static void torture_config_user_from_config_applies(void **state)
+{
+    ssh_session session = *state;
+    char *user = NULL;
+    int rc;
+
+    _parse_config(session, NULL, "User configuser\n", SSH_OK);
+
+    rc = ssh_options_get(session, SSH_OPTIONS_USER, &user);
+    assert_ssh_return_code(session, rc);
+    assert_non_null(user);
+    assert_string_equal(user, "configuser");
+    SSH_STRING_FREE_CHAR(user);
+}
+
+/* Protection is general, not User-specific: an app-set Port survives config. */
+static void torture_config_port_not_overridden(void **state)
+{
+    ssh_session session = *state;
+    unsigned int port = 2020;
+    int rc;
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+    assert_ssh_return_code(session, rc);
+
+    _parse_config(session, NULL, "Port 2222\n", SSH_OK);
+    assert_int_equal(session->opts.port, 2020);
+}
+
+/* The host match key is NOT protected: config HostName still resolves an
+ * app-set alias to the real hostname. */
+static void torture_config_hostname_still_resolves(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "myalias");
+    assert_ssh_return_code(session, rc);
+
+    _parse_config(session,
+                  NULL,
+                  "Host myalias\n\tHostName real.example.com\n",
+                  SSH_OK);
+
+    assert_non_null(session->opts.host);
+    assert_string_equal(session->opts.host, "real.example.com");
+}
+
+/* HostName keeps its own "first obtained value wins" precedence between config
+ * entries, independently of the application-set SSH_OPTIONS_HOST lookup key.
+ * Every target below resolves to the first HostName, matching OpenSSH:
+ *
+ *   $ ssh -F config -G test  | grep ^hostname   ->  hostname test
+ *   $ ssh -F config -G test2 | grep ^hostname   ->  hostname test
+ *   $ ssh -F config -G test3 | grep ^hostname   ->  hostname test
+ */
+static void torture_config_hostname_first_wins(void **state)
+{
+    ssh_session session = *state;
+    const char *config = "HostName test\n"
+                         "HostName test2\n"
+                         "Match host test2\n"
+                         "\tHostName test3\n";
+    const char *targets[] = {"test", "test2", "test3"};
+    size_t i;
+    int rc;
+
+    (void)session;
+
+    for (i = 0; i < ARRAY_SIZE(targets); i++) {
+        ssh_session s = ssh_new();
+        assert_non_null(s);
+
+        rc = ssh_options_set(s, SSH_OPTIONS_HOST, targets[i]);
+        assert_ssh_return_code(s, rc);
+
+        _parse_config(s, NULL, config, SSH_OK);
+
+        assert_non_null(s->opts.host);
+        assert_string_equal(s->opts.host, "test");
+
+        ssh_free(s);
+    }
+}
+
+/* Operational options like log verbosity are NOT protected: config LogLevel
+ * still applies even if the application set verbosity beforehand. */
+static void torture_config_loglevel_not_overridden(void **state)
+{
+    ssh_session session = *state;
+    int level = SSH_LOG_NOLOG;
+    int rc;
+
+    rc = ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &level);
+    assert_ssh_return_code(session, rc);
+
+    _parse_config(session, NULL, "LogLevel DEBUG3\n", SSH_OK);
+
+    assert_int_equal(session->common.log_verbosity, SSH_LOG_TRACE);
 }
 
 int torture_run_tests(void)
@@ -3628,6 +5632,30 @@ int torture_run_tests(void)
         cmocka_unit_test_setup_teardown(torture_config_auth_methods_string,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(torture_config_numeric_invalid_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_numeric_invalid_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_timeout_suffix_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_timeout_suffix_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_boolean_invalid_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_boolean_invalid_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_boolean_compat_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_boolean_compat_string,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_config_unknown_file,
                                         setup,
                                         teardown),
@@ -3667,6 +5695,88 @@ int torture_run_tests(void)
         cmocka_unit_test_setup_teardown(torture_config_batch_mode_string,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(torture_config_forward_agent_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_forward_agent_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_gateway_ports_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_gateway_ports_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_exit_on_forward_failure_file,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_exit_on_forward_failure_string,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_server_alive_interval_file,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_server_alive_interval_string,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_server_alive_count_max_file,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_server_alive_count_max_string,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_preferred_authentications_file,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_preferred_authentications_string,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_number_of_password_prompts_file,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_config_number_of_password_prompts_string,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(torture_config_request_tty_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_request_tty_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_escape_char_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_escape_char_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_local_forward_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_local_forward_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_remote_forward_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_remote_forward_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_send_env_file,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_send_env_string,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_config_address_family_file,
                                         setup,
                                         teardown),
@@ -3677,6 +5787,9 @@ int torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_rekey_string,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_rekey_cli_optional_time,
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_plus_file,
@@ -3730,12 +5843,19 @@ int torture_run_tests(void)
         cmocka_unit_test_setup_teardown(torture_config_parser_get_token_info,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(torture_config_parser_get_yesno,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_get_path,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_config_match_pattern,
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_config_identity,
-                                        setup,
-                                        teardown),
+                                        setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_config_identity_override,
+                                        setup, teardown),
         cmocka_unit_test_setup_teardown(torture_config_make_absolute,
                                         setup,
                                         teardown),
@@ -3758,7 +5878,28 @@ int torture_run_tests(void)
         cmocka_unit_test_setup_teardown(torture_config_boolean_aliases,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(torture_config_hostname_scan_null,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_config_invalid,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_user_not_overridden,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_user_from_config_applies,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_port_not_overridden,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_hostname_still_resolves,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_hostname_first_wins,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_config_loglevel_not_overridden,
                                         setup,
                                         teardown),
     };

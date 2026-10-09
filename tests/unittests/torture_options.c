@@ -853,9 +853,49 @@ static void torture_options_set_port(void **state)
     assert_true(rc == 0);
     assert_true(session->opts.port == 23);
 
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "23abc");
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 23);
+
     rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "five");
     assert_true(rc == -1);
-    assert_int_not_equal(session->opts.port, 0);
+    assert_true(session->opts.port == 23);
+
+    port = 65535;
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+    assert_true(rc == 0);
+    assert_true(session->opts.port == 65535);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "65535");
+    assert_true(rc == 0);
+    assert_true(session->opts.port == 65535);
+
+    port = 65536;
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "65536");
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
+
+    port = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "-1");
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
+
+    port = 70000;
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT, &port);
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_PORT_STR, "70000");
+    assert_true(rc == -1);
+    assert_true(session->opts.port == 65535);
 
     rc = ssh_options_set(session, SSH_OPTIONS_PORT, NULL);
     assert_true(rc == -1);
@@ -1243,7 +1283,7 @@ static void torture_options_config_host(void **state)
     rv = ssh_options_parse_config(session, "test_config");
     assert_int_equal(rv, -1);
 
-    /* Config Hostname with invalid hostname: verify stale host not leaked */
+    /* Config HostName with alias containing underscores: verify it parses successfully */
     torture_write_file("test_config", "Host 192.168.1.1\nHostname my_alias\n");
 
     torture_reset_config(session);
@@ -1252,7 +1292,7 @@ static void torture_options_config_host(void **state)
     assert_string_equal(session->opts.originalhost, "192.168.1.1");
     rv = ssh_options_parse_config(session, "test_config");
     assert_int_equal(rv, 0);
-    assert_null(session->opts.host);
+    assert_string_equal(session->opts.host, "my_alias");
     assert_string_equal(session->opts.originalhost, "192.168.1.1");
 
     /* Calling ssh_options_set(HOST) twice: verify stale host not leaked */
@@ -1260,6 +1300,10 @@ static void torture_options_config_host(void **state)
     assert_string_equal(session->opts.host, "real.server.com");
     assert_string_equal(session->opts.originalhost, "real.server.com");
 
+    /* Note: "my_alias" is intentionally rejected by ssh_options_set() because
+     * it contains an underscore, making it an invalid DNS hostname. The config
+     * parser, however, correctly treats HostName as an opaque string.
+     */
     ssh_options_set(session, SSH_OPTIONS_HOST, "my_alias");
     assert_null(session->opts.host);
     assert_string_equal(session->opts.originalhost, "my_alias");
@@ -1794,14 +1838,19 @@ static void torture_options_copy(void **state)
           /* ops.custombanner */
           "ConnectTimeout 42\n"
           "Port 222\n"
-          "StrictHostKeyChecking no\n"
+          "StrictHostKeyChecking accept-new\n"
           "GSSAPIServerIdentity my.example.com\n"
           "GSSAPIClientIdentity home.sweet\n"
           "GSSAPIDelegateCredentials yes\n"
-          "PubkeyAuthentication yes\n" /* sets flags */
-          "GSSAPIAuthentication no\n"  /* sets flags */
+          "PubkeyAuthentication host-bound\n" /* sets flags */
+          "GSSAPIAuthentication no\n"         /* sets flags */
           "AddressFamily inet6\n"
           "Tag copied-tag\n"
+          "LocalForward 8080 web:80\n"
+          "RemoteForward 9090 db:3306\n"
+          "SendEnv LANG LC_*\n"
+          "SendEnv TZ\n"
+          "ForwardAgent /tmp/copied.sock\n"
           "",
           config);
     fclose(config);
@@ -1830,6 +1879,46 @@ static void torture_options_copy(void **state)
     it = ssh_list_get_iterator(session->opts.certificate_non_exp);
     assert_non_null(it);
     it2 = ssh_list_get_iterator(new->opts.certificate_non_exp);
+    assert_non_null(it2);
+    while (it != NULL && it2 != NULL) {
+        assert_string_equal(it->data, it2->data);
+        it = it->next;
+        it2 = it2->next;
+    }
+    assert_null(it);
+    assert_null(it2);
+
+    /* Check the local forwards match */
+    it = ssh_list_get_iterator(session->opts.local_forward);
+    assert_non_null(it);
+    it2 = ssh_list_get_iterator(new->opts.local_forward);
+    assert_non_null(it2);
+    while (it != NULL && it2 != NULL) {
+        assert_string_equal(it->data, it2->data);
+        it = it->next;
+        it2 = it2->next;
+    }
+    assert_null(it);
+    assert_null(it2);
+
+    /* Check the remote forwards match */
+    it = ssh_list_get_iterator(session->opts.remote_forward);
+    assert_non_null(it);
+    it2 = ssh_list_get_iterator(new->opts.remote_forward);
+    assert_non_null(it2);
+    while (it != NULL && it2 != NULL) {
+        assert_string_equal(ssh_iterator_value(const char *, it),
+                            ssh_iterator_value(const char *, it2));
+        it = it->next;
+        it2 = it2->next;
+    }
+    assert_null(it);
+    assert_null(it2);
+
+    /* Check the send_env patterns match */
+    it = ssh_list_get_iterator(session->opts.send_env);
+    assert_non_null(it);
+    it2 = ssh_list_get_iterator(new->opts.send_env);
     assert_non_null(it2);
     while (it != NULL && it2 != NULL) {
         assert_string_equal(it->data, it2->data);
@@ -1875,12 +1964,27 @@ static void torture_options_copy(void **state)
                         new->opts.gss_client_identity);
     assert_int_equal(session->opts.gss_delegate_creds,
                      new->opts.gss_delegate_creds);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_ACCEPT_NEW);
+    assert_int_equal(new->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_ACCEPT_NEW);
     assert_int_equal(session->opts.flags, new->opts.flags);
+    assert_int_equal(session->opts.pubkey_auth, SSH_PUBKEY_AUTH_HOST_BOUND);
+    assert_int_equal(new->opts.pubkey_auth, SSH_PUBKEY_AUTH_HOST_BOUND);
+    assert_int_equal(session->opts.pubkey_auth, new->opts.pubkey_auth);
     assert_int_equal(session->opts.nodelay, new->opts.nodelay);
     assert_true(session->opts.config_processed == new->opts.config_processed);
     assert_memory_equal(session->opts.options_seen, new->opts.options_seen,
                         sizeof(session->opts.options_seen));
     assert_int_equal(session->opts.address_family, new->opts.address_family);
+
+    /* Check the forward_agent option and its socket path are copied */
+    assert_true(session->opts.forward_agent);
+    assert_true(new->opts.forward_agent);
+    assert_non_null(session->opts.forward_agent_sock_path);
+    assert_non_null(new->opts.forward_agent_sock_path);
+    assert_string_equal(new->opts.forward_agent_sock_path,
+                        session->opts.forward_agent_sock_path);
 
     ssh_free(new);
 
@@ -1911,6 +2015,102 @@ static void torture_options_copy(void **state)
     assert_null(it2);
 
     ssh_free(new);
+
+    /* Verify that a session without a socket path copies with a NULL path */
+    {
+        ssh_session no_path = ssh_new();
+        ssh_session copied_no_path = NULL;
+        bool val = true;
+
+        assert_non_null(no_path);
+
+        /* Enable ForwardAgent without an explicit socket path */
+        rv = ssh_options_set(no_path, SSH_OPTIONS_FORWARD_AGENT, &val);
+        assert_ssh_return_code(no_path, rv);
+        assert_true(no_path->opts.forward_agent);
+        assert_null(no_path->opts.forward_agent_sock_path);
+
+        /* The copied session must preserve the NULL socket path */
+        rv = ssh_options_copy(no_path, &copied_no_path);
+        assert_ssh_return_code(no_path, rv);
+        assert_non_null(copied_no_path);
+        assert_true(copied_no_path->opts.forward_agent);
+        assert_null(copied_no_path->opts.forward_agent_sock_path);
+
+        /* Free the temporary sessions */
+        ssh_free(copied_no_path);
+        ssh_free(no_path);
+    }
+}
+
+static void torture_options_legacy_integer_values(void **state)
+{
+    ssh_session session = *state;
+    int legacy_strict_value = 42;
+    int negative_strict_value = -1;
+    int zero_low_byte_strict_value = 256;
+    int negative_zero_low_byte_strict_value = -256;
+    int negative_pubkey_value = -1;
+    int legacy_pubkey_value = 42;
+    int disabled_pubkey_value = 0;
+    int rc;
+
+    /*
+     * Legacy boolean-style integer inputs should continue to normalize to the
+     * compatible multistate values accepted by ssh_options_set().
+     */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_STRICTHOSTKEYCHECK,
+                         &legacy_strict_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_YES);
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_STRICTHOSTKEYCHECK,
+                         &negative_strict_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_YES);
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_STRICTHOSTKEYCHECK,
+                         &zero_low_byte_strict_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_OFF);
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_STRICTHOSTKEYCHECK,
+                         &negative_zero_low_byte_strict_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.StrictHostKeyChecking,
+                     SSH_STRICT_HOSTKEY_OFF);
+
+    /*
+     * StrictHostKeyChecking preserves the legacy low-byte normalization, while
+     * PubkeyAuthentication keeps its legacy full-integer behavior so callers
+     * passing -1 still land on SSH_PUBKEY_AUTH_ALL.
+     */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PUBKEY_AUTH,
+                         &disabled_pubkey_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.pubkey_auth, SSH_PUBKEY_AUTH_NO);
+    assert_false((session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH) != 0);
+
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PUBKEY_AUTH,
+                         &negative_pubkey_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.pubkey_auth, SSH_PUBKEY_AUTH_ALL);
+    assert_true((session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH) != 0);
+
+    rc =
+        ssh_options_set(session, SSH_OPTIONS_PUBKEY_AUTH, &legacy_pubkey_value);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.pubkey_auth, SSH_PUBKEY_AUTH_ALL);
+    assert_true((session->opts.flags & SSH_OPT_FLAG_PUBKEY_AUTH) != 0);
 }
 
 #define EXECUTABLE_NAME "test-exec"
@@ -2632,6 +2832,60 @@ static void torture_options_apply (void **state)
     ssh_list_free(awaited_list);
 }
 
+static void torture_options_apply_control_path_original_host(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "my-alias");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.originalhost, "my-alias");
+
+    SAFE_FREE(session->opts.host);
+    session->opts.host = strdup("192.168.1.1");
+    assert_non_null(session->opts.host);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_CONTROL_PATH, "/tmp/%n-%h-%p");
+    assert_ssh_return_code(session, rc);
+
+    rc = ssh_options_apply(session);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.exp_flags & SSH_OPT_EXP_FLAG_CONTROL_PATH);
+    assert_string_equal(session->opts.control_path,
+                        "/tmp/my-alias-192.168.1.1-22");
+}
+
+static void
+torture_options_apply_proxycommand_original_host_config(void **state)
+{
+    ssh_session session = *state;
+    int rc;
+
+    torture_write_file("test_config",
+                       "Host my_alias\n"
+                       "\tHostName 192.168.1.1\n"
+                       "\tProxyCommand echo %n-%h-%p\n");
+
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, "my_alias");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.originalhost, "my_alias");
+    assert_null(session->opts.host);
+
+    rc = ssh_options_parse_config(session, "test_config");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.originalhost, "my_alias");
+    assert_string_equal(session->opts.host, "192.168.1.1");
+    assert_string_equal(session->opts.ProxyCommand, "echo %n-%h-%p");
+
+    rc = ssh_options_apply(session);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.exp_flags & SSH_OPT_EXP_FLAG_PROXYCOMMAND);
+    assert_string_equal(session->opts.ProxyCommand,
+                        "exec echo my_alias-192.168.1.1-22");
+
+    unlink("test_config");
+}
+
 static void torture_options_set_verbosity (void **state)
 {
     ssh_session session = *state;
@@ -2676,6 +2930,655 @@ static void torture_options_set_batch_mode(void **state)
     rc = ssh_options_set(session, SSH_OPTIONS_BATCH_MODE, &val);
     assert_ssh_return_code(session, rc);
     assert_true(session->opts.batch_mode);
+}
+
+static void torture_options_set_exit_on_forward_failure(void **state)
+{
+    ssh_session session = *state;
+    bool val = false;
+    int rc = SSH_OK;
+
+    /* Default value after setup() should be false */
+    assert_false(session->opts.exit_on_forward_failure);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, NULL);
+    assert_int_equal(rc, -1);
+
+    /* ExitOnForwardFailure will be disabled */
+    val = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &val);
+    assert_ssh_return_code(session, rc);
+    assert_false(session->opts.exit_on_forward_failure);
+
+    /* ExitOnForwardFailure will be enabled */
+    val = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &val);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.exit_on_forward_failure);
+}
+
+static void torture_options_set_gateway_ports(void **state)
+{
+    ssh_session session = *state;
+    bool val = false;
+    int rc = SSH_OK;
+
+    /* Default value after setup() should be false */
+    assert_false(session->opts.gateway_ports);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_GATEWAY_PORTS, NULL);
+    assert_int_equal(rc, -1);
+
+    /* GatewayPorts will be enabled */
+    val = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_GATEWAY_PORTS, &val);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.gateway_ports);
+
+    /* GatewayPorts will be disabled */
+    val = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_GATEWAY_PORTS, &val);
+    assert_ssh_return_code(session, rc);
+    assert_false(session->opts.gateway_ports);
+}
+
+static void torture_options_set_server_alive_interval(void **state)
+{
+    ssh_session session = *state;
+    int val = 0;
+    int rc;
+
+    /* Default value after setup() should be 0 */
+    assert_int_equal(session->opts.server_alive_interval, 0);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Negative value must be rejected */
+    val = -1;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &val);
+    assert_int_equal(rc, -1);
+
+    /* Set to 10 seconds */
+    val = 10;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_interval, 10);
+
+    /* Set to 300 seconds */
+    val = 300;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_interval, 300);
+
+    /* Reset to 0 (disabled) */
+    val = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_interval, 0);
+}
+
+static void torture_options_set_server_alive_count_max(void **state)
+{
+    ssh_session session = *state;
+    int val = 0;
+    int rc;
+
+    /* Default value after setup() should be 3 */
+    assert_int_equal(session->opts.server_alive_count_max, 3);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Negative value must be rejected */
+    val = -1;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX, &val);
+    assert_int_equal(rc, -1);
+
+    /* Set to 1 */
+    val = 1;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_count_max, 1);
+
+    /* Set to 10 */
+    val = 10;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_count_max, 10);
+
+    /* Reset to 0 (no tolerance) */
+    val = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.server_alive_count_max, 0);
+}
+
+static void torture_options_set_forward_agent(void **state)
+{
+    ssh_session session = *state;
+    bool val = false;
+    char *sock_path = NULL;
+    int rc = SSH_OK;
+
+    /* Default value after setup() should be false */
+    assert_false(session->opts.forward_agent);
+    assert_null(session->opts.forward_agent_sock_path);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT, NULL);
+    assert_int_equal(rc, -1);
+
+    /* ForwardAgent will be disabled */
+    val = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT, &val);
+    assert_ssh_return_code(session, rc);
+    assert_false(session->opts.forward_agent);
+
+    /* ForwardAgent will be enabled */
+    val = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT, &val);
+    assert_ssh_return_code(session, rc);
+    assert_true(session->opts.forward_agent);
+
+    /* NULL socket path must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Empty socket path must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH, "");
+    assert_int_equal(rc, -1);
+
+    /* Setting an explicit socket path */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH,
+                         "/tmp/agent.sock");
+    assert_ssh_return_code(session, rc);
+    assert_non_null(session->opts.forward_agent_sock_path);
+
+    /* The socket path can be read back */
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH,
+                         &sock_path);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(sock_path, "/tmp/agent.sock");
+    ssh_string_free_char(sock_path);
+    sock_path = NULL;
+}
+
+static void torture_options_escape_char(void **state)
+{
+    ssh_session session = *state;
+    int val = 0;
+    int result = 0;
+    int rc = 0;
+
+    /* Default value should be 0 */
+    assert_int_equal(session->opts.escape_char, 0);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, NULL);
+    assert_int_equal(rc, -1);
+
+    /* 0 is reserved for unset and must be rejected */
+    val = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, &val);
+    assert_int_equal(rc, -1);
+
+    /* -1 means "none" */
+    val = -1;
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, &val);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ESCAPE_CHAR, &result);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(result, -1);
+
+    /* Values less than -1 must be rejected */
+    val = -2;
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, &val);
+    assert_int_equal(rc, -1);
+
+    /* Values greater than 255 must be rejected */
+    val = 256;
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, &val);
+    assert_int_equal(rc, -1);
+
+    /* Standard tilde escape */
+    val = '~';
+    rc = ssh_options_set(session, SSH_OPTIONS_ESCAPE_CHAR, &val);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_ESCAPE_CHAR, &result);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(result, '~');
+}
+
+static void torture_options_local_forward(void **state)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc;
+
+    /* Getting an unset option will fail */
+    rc = ssh_options_get(session, SSH_OPTIONS_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* NEXT_LOCAL_FORWARD without prior LOCAL_FORWARD will return SSH_ERROR */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+    assert_null(value);
+
+    /* NULL pattern will be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_LOCAL_FORWARD, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Empty pattern will be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_LOCAL_FORWARD, "");
+    assert_int_equal(rc, -1);
+
+    /* Adding two forwarding specs */
+    rc = ssh_options_set(session, SSH_OPTIONS_LOCAL_FORWARD, "8080 web:80");
+    assert_ssh_return_code(session, rc);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_LOCAL_FORWARD, "0.0.0.0:9090 db:3306");
+    assert_ssh_return_code(session, rc);
+
+    /* First entry */
+    rc = ssh_options_get(session, SSH_OPTIONS_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "8080 web:80");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second entry */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "0.0.0.0:9090 db:3306");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Iterator exhausted */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_LOCAL_FORWARD, &value);
+    assert_int_equal(rc, SSH_EOF);
+    assert_null(value);
+}
+
+static void torture_options_remote_forward(void **state)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc;
+
+    /* Getting an unset option will fail */
+    rc = ssh_options_get(session, SSH_OPTIONS_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+
+    /* NEXT_REMOTE_FORWARD without prior REMOTE_FORWARD will return SSH_ERROR */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_ERROR);
+    assert_null(value);
+
+    /* NULL pattern will be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_REMOTE_FORWARD, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Empty pattern will be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_REMOTE_FORWARD, "");
+    assert_int_equal(rc, -1);
+
+    /* Adding two forwarding specs */
+    rc = ssh_options_set(session, SSH_OPTIONS_REMOTE_FORWARD, "8080 web:80");
+    assert_ssh_return_code(session, rc);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_REMOTE_FORWARD, "0.0.0.0:9090 db:3306");
+    assert_ssh_return_code(session, rc);
+
+    /* First entry */
+    rc = ssh_options_get(session, SSH_OPTIONS_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "8080 web:80");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second entry */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "0.0.0.0:9090 db:3306");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Iterator exhausted */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_REMOTE_FORWARD, &value);
+    assert_int_equal(rc, SSH_EOF);
+    assert_null(value);
+}
+
+static void torture_options_set_preferred_authentications(void **state)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc;
+
+    /* Default value after setup() should be NULL */
+    assert_null(session->opts.preferred_authentications);
+
+    /* Getting an unset option will fail */
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_int_not_equal(rc, SSH_OK);
+    assert_null(value);
+
+    /* NULL value should clear the option */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         NULL);
+    assert_ssh_return_code(session, rc);
+    assert_null(session->opts.preferred_authentications);
+
+    /* Valid comma-separated list */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         "publickey,password");
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(session->opts.preferred_authentications,
+                        "publickey,password");
+
+    /* Getting a set option should succeed and return the same value */
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(value, "publickey,password");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Empty string is an error and it would silently block all auth */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         "");
+    assert_int_equal(rc, -1);
+
+    /* Set a different value and verify get round-trip */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         "publickey");
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_ssh_return_code(session, rc);
+    assert_string_equal(value, "publickey");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Clear the option with NULL */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         NULL);
+    assert_ssh_return_code(session, rc);
+    assert_null(session->opts.preferred_authentications);
+
+    /* Getting a cleared option should fail */
+    rc = ssh_options_get(session,
+                         SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                         &value);
+    assert_int_not_equal(rc, SSH_OK);
+    assert_null(value);
+}
+
+static void torture_options_userauth_list_no_preference(void **state)
+{
+    ssh_session session = *state;
+    int methods = 0;
+
+    /* Set up a known set of server-advertised methods */
+    session->auth.supported_methods = SSH_AUTH_METHOD_PUBLICKEY |
+                                      SSH_AUTH_METHOD_PASSWORD |
+                                      SSH_AUTH_METHOD_INTERACTIVE;
+
+    /* Without PreferredAuthentications, ssh_userauth_list returns all */
+    methods = ssh_userauth_list(session, NULL);
+    assert_int_equal(methods, SSH_AUTH_METHOD_PUBLICKEY |
+                              SSH_AUTH_METHOD_PASSWORD |
+                              SSH_AUTH_METHOD_INTERACTIVE);
+}
+
+static void torture_options_userauth_list_filter_subset(void **state)
+{
+    ssh_session session = *state;
+    int methods = 0;
+
+    session->auth.supported_methods = SSH_AUTH_METHOD_PUBLICKEY |
+                                      SSH_AUTH_METHOD_PASSWORD |
+                                      SSH_AUTH_METHOD_INTERACTIVE |
+                                      SSH_AUTH_METHOD_HOSTBASED;
+
+    /* Whitespace around method names should be trimmed by ssh_userauth_list */
+    ssh_options_set(session,
+                    SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                    " publickey ,  password ");
+    methods = ssh_userauth_list(session, NULL);
+    assert_int_equal(methods, SSH_AUTH_METHOD_PUBLICKEY |
+                              SSH_AUTH_METHOD_PASSWORD);
+}
+
+static void torture_options_userauth_list_method_not_supported(void **state)
+{
+    ssh_session session = *state;
+    int methods = 0;
+
+    session->auth.supported_methods = SSH_AUTH_METHOD_GSSAPI_MIC;
+
+    ssh_options_set(session,
+                    SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                    "publickey,password");
+    methods = ssh_userauth_list(session, NULL);
+    assert_int_equal(methods, 0);
+}
+
+static void torture_options_userauth_list_unknown_method_ignored(void **state)
+{
+    ssh_session session = *state;
+    int methods = 0;
+
+    session->auth.supported_methods = SSH_AUTH_METHOD_PUBLICKEY |
+                                      SSH_AUTH_METHOD_PASSWORD;
+
+    ssh_options_set(session,
+                    SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+                    "publickey,garbage,password");
+    methods = ssh_userauth_list(session, NULL);
+    assert_int_equal(methods, SSH_AUTH_METHOD_PUBLICKEY |
+                              SSH_AUTH_METHOD_PASSWORD);
+}
+
+static void torture_options_number_of_password_prompts(void **state)
+{
+    ssh_session session = *state;
+    int val = 0;
+    int result = 0;
+    int rc = 0;
+
+    /* Default should be 0 */
+    assert_int_equal(session->opts.number_of_password_prompts, 0);
+
+    /* NULL will be rejected */
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                         NULL);
+    assert_int_equal(rc, -1);
+
+    /* 0 is not a valid prompt count */
+    val = 0;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                         &val);
+    assert_int_equal(rc, -1);
+
+    /* Negative is not a valid prompt count */
+    val = -1;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                         &val);
+    assert_int_equal(rc, -1);
+
+    /* 3 is the OpenSSH default which will be accepted */
+    val = 3;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                         &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.number_of_password_prompts, 3);
+
+    /* Verify get returns the same value we just set */
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                             &result);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(result, 3);
+
+    /* 1 is the minimum sensible value */
+    val = 1;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+                         &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.number_of_password_prompts, 1);
+}
+
+static void torture_options_set_request_tty(void **state)
+{
+    ssh_session session = *state;
+    int val = 0;
+    int rc = 0;
+
+    /* Default value should be SSH_REQUEST_TTY_NO */
+    assert_int_equal(session->opts.request_tty, SSH_REQUEST_TTY_NO);
+
+    /* NULL value must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Valid values */
+    val = SSH_REQUEST_TTY_NO;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.request_tty, SSH_REQUEST_TTY_NO);
+
+    val = SSH_REQUEST_TTY_YES;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.request_tty, SSH_REQUEST_TTY_YES);
+
+    val = SSH_REQUEST_TTY_AUTO;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.request_tty, SSH_REQUEST_TTY_AUTO);
+
+    val = SSH_REQUEST_TTY_FORCE;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_ssh_return_code(session, rc);
+    assert_int_equal(session->opts.request_tty, SSH_REQUEST_TTY_FORCE);
+
+    /* Invalid value must be rejected */
+    val = -1;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_int_equal(rc, -1);
+
+    val = 100;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &val);
+    assert_int_equal(rc, -1);
+}
+
+static void torture_options_send_env(void **state)
+{
+    ssh_session session = *state;
+    char *value = NULL;
+    int rc;
+
+    /* Getting an unset option will fail */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_not_equal(rc, SSH_OK);
+
+    /* NEXT_SEND_ENV without prior SEND_ENV must return SSH_ERROR */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_ERROR);
+    assert_null(value);
+
+    /* NULL pattern must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, NULL);
+    assert_int_equal(rc, -1);
+
+    /* Empty pattern must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "");
+    assert_int_equal(rc, -1);
+
+    /* Adding two patterns */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "LANG");
+    assert_ssh_return_code(session, rc);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "LC_*");
+    assert_ssh_return_code(session, rc);
+
+    /* First pattern */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LANG");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Second pattern */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LC_*");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    /* Iterator exhausted */
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_EOF);
+    assert_null(value);
+
+    /* '-' alone (empty pattern after prefix) must be rejected */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "-");
+    assert_int_equal(rc, -1);
+
+    /* Removing an existing pattern */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "LANG");
+    assert_ssh_return_code(session, rc);
+
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "-LANG");
+    assert_ssh_return_code(session, rc);
+
+    /* Only LC_* should remain */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LC_*");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_EOF);
+    assert_null(value);
+
+    /* Removing a non-existing pattern should not affect existing patterns */
+    rc = ssh_options_set(session, SSH_OPTIONS_SEND_ENV, "-NONEXIST");
+    assert_ssh_return_code(session, rc);
+
+    /* LC_* should still be there */
+    rc = ssh_options_get(session, SSH_OPTIONS_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_OK);
+    assert_string_equal(value, "LC_*");
+    ssh_string_free_char(value);
+    value = NULL;
+
+    rc = ssh_options_get(session, SSH_OPTIONS_NEXT_SEND_ENV, &value);
+    assert_int_equal(rc, SSH_EOF);
+    assert_null(value);
 }
 
 static void torture_options_get_int(void **state)
@@ -2758,18 +3661,18 @@ static void torture_options_get_int(void **state)
     assert_int_equal(rc, SSH_OK);
     assert_int_equal(result, SSH_LOG_WARNING);
 
-    /* SSH_OPTIONS_STRICTHOSTKEYCHECK: default should be 1 */
+    /* SSH_OPTIONS_STRICTHOSTKEYCHECK: default should be ASK */
     rc = ssh_options_get_int(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &result);
     assert_int_equal(rc, SSH_OK);
-    assert_int_equal(result, 1);
+    assert_int_equal(result, SSH_STRICT_HOSTKEY_ASK);
 
-    /* After disabling, getter should return 0 */
+    /* After disabling, getter should return OFF */
     ival = 0;
     rc = ssh_options_set(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &ival);
     assert_ssh_return_code(session, rc);
     rc = ssh_options_get_int(session, SSH_OPTIONS_STRICTHOSTKEYCHECK, &result);
     assert_int_equal(rc, SSH_OK);
-    assert_int_equal(result, 0);
+    assert_int_equal(result, SSH_STRICT_HOSTKEY_OFF);
 
     /* SSH_OPTIONS_NODELAY: default should be 0 */
     rc = ssh_options_get_int(session, SSH_OPTIONS_NODELAY, &result);
@@ -2907,6 +3810,157 @@ static void torture_options_get_int(void **state)
     assert_int_equal(rc, SSH_OK);
     assert_int_equal(result, 2222);
 
+    /* SSH_OPTIONS_REQUEST_TTY default should be SSH_REQUEST_TTY_NO */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_REQUEST_TTY_NO);
+
+    /* After setting to YES, getter should return YES */
+    ival = SSH_REQUEST_TTY_YES;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_REQUEST_TTY_YES);
+
+    /* After setting to AUTO, getter should return AUTO */
+    ival = SSH_REQUEST_TTY_AUTO;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_REQUEST_TTY_AUTO);
+
+    /* After setting to FORCE, getter should return FORCE */
+    ival = SSH_REQUEST_TTY_FORCE;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_REQUEST_TTY_FORCE);
+
+    /* After setting back to NO, getter should return NO */
+    ival = SSH_REQUEST_TTY_NO;
+    rc = ssh_options_set(session, SSH_OPTIONS_REQUEST_TTY, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_REQUEST_TTY, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, SSH_REQUEST_TTY_NO);
+
+    /* SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    bval = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling, getter should return 0 */
+    bval = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_GATEWAY_PORTS: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GATEWAY_PORTS, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    bval = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_GATEWAY_PORTS, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GATEWAY_PORTS, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling, getter should return 0 */
+    bval = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_GATEWAY_PORTS, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_GATEWAY_PORTS, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_SERVER_ALIVE_INTERVAL default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After setting to 10, getter should return 10 */
+    ival = 10;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 10);
+
+    /* After resetting to 0, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_SERVER_ALIVE_INTERVAL, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX default should be 3 */
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 3);
+
+    /* After setting to 10, getter should return 10 */
+    ival = 10;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                         &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 10);
+
+    /* After resetting to 0, getter should return 0 */
+    ival = 0;
+    rc = ssh_options_set(session,
+                         SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                         &ival);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session,
+                             SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
+                             &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* SSH_OPTIONS_FORWARD_AGENT: default should be 0 */
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
+
+    /* After enabling, getter should return 1 */
+    bval = true;
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 1);
+
+    /* After disabling, getter should return 0 */
+    bval = false;
+    rc = ssh_options_set(session, SSH_OPTIONS_FORWARD_AGENT, &bval);
+    assert_ssh_return_code(session, rc);
+    rc = ssh_options_get_int(session, SSH_OPTIONS_FORWARD_AGENT, &result);
+    assert_int_equal(rc, SSH_OK);
+    assert_int_equal(result, 0);
 }
 
 static void torture_options_set_rsa_min_size(void **state)
@@ -3951,6 +5005,9 @@ torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_options_copy, setup, teardown),
+        cmocka_unit_test_setup_teardown(torture_options_legacy_integer_values,
+                                        setup,
+                                        teardown),
         cmocka_unit_test_setup_teardown(torture_options_config_host,
                                         setup,
                                         teardown),
@@ -3988,6 +5045,14 @@ torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_options_apply, setup, teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_options_apply_control_path_original_host,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_options_apply_proxycommand_original_host_config,
+            setup,
+            teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_verbosity,
                                         setup,
                                         teardown),
@@ -3998,6 +5063,55 @@ torture_run_tests(void)
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_options_set_batch_mode,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_forward_agent,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_gateway_ports,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_options_set_exit_on_forward_failure,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(torture_options_escape_char,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_server_alive_interval,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_server_alive_count_max,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_local_forward,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_remote_forward,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_preferred_authentications,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_userauth_list_no_preference,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_userauth_list_filter_subset,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_userauth_list_method_not_supported,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_userauth_list_unknown_method_ignored,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_number_of_password_prompts,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_set_request_tty,
+                                        setup,
+                                        teardown),
+        cmocka_unit_test_setup_teardown(torture_options_send_env,
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_options_get_int,

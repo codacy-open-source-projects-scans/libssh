@@ -26,12 +26,16 @@
 #include "libssh/crypto.h"
 #include "mbedcrypto-compat.h"
 
+#if MBEDTLS_VERSION_MAJOR < 4
 mbedtls_ctr_drbg_context ssh_mbedtls_ctr_drbg;
 
 int
 ssh_mbedtls_random(void *where, int len, int strong)
 {
     int rc = 0;
+    if (!ssh_mbedtls_initialized()) {
+        return 0;
+    }
     if (strong) {
         mbedtls_ctr_drbg_set_prediction_resistance(&ssh_mbedtls_ctr_drbg,
                                                    MBEDTLS_CTR_DRBG_PR_ON);
@@ -41,9 +45,10 @@ ssh_mbedtls_random(void *where, int len, int strong)
     } else {
         rc = mbedtls_ctr_drbg_random(&ssh_mbedtls_ctr_drbg, where, len);
     }
-
     return !rc;
 }
+
+#endif /* MBEDTLS_VERSION_MAJOR < 4 */
 
 int
 ssh_get_random(void *where, int len, int strong)

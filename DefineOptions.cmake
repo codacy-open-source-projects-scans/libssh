@@ -1,6 +1,7 @@
 option(WITH_GSSAPI "Build with GSSAPI support" ON)
 option(WITH_ZLIB "Build with ZLIB support" ON)
 option(WITH_SFTP "Build with SFTP support" ON)
+option(WITH_SCP "Build with SCP support" ON)
 option(WITH_SERVER "Build with SSH server support" ON)
 option(WITH_DEBUG_CRYPTO "Build with crypto debug output" OFF)
 option(WITH_DEBUG_PACKET "Build with packet debug output" OFF)
@@ -41,6 +42,10 @@ option(
 option(
     FUZZ_TESTING
     "Build with fuzzer for the server and client (automatically enables none cipher!)"
+    OFF)
+option(
+    FUZZ_CONTINUOUS_MODE
+    "Continuous fuzzing in Differential Configuration fuzzer"
     OFF)
 option(PICKY_DEVELOPER "Build with picky developer flags" OFF)
 option(WITH_HERMETIC_USR "Build with support for hermetic /usr/" OFF)

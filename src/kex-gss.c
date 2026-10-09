@@ -317,6 +317,12 @@ SSH_PACKET_CALLBACK(ssh_packet_client_gss_kex_reply)
         rc = ecdh_build_k(session);
         break;
     case SSH_GSS_KEX_CURVE25519_SHA256:
+        if (ssh_string_len(server_pubkey) != CURVE25519_PUBKEY_SIZE) {
+            ssh_set_error(session,
+                          SSH_FATAL,
+                          "Incorrect length of received server Curve25519 pubkey");
+            goto error;
+        }
         memcpy(crypto->curve25519_server_pubkey,
                ssh_string_data(server_pubkey),
                CURVE25519_PUBKEY_SIZE);
@@ -484,6 +490,12 @@ int ssh_server_gss_kex_process_init(ssh_session session, ssh_buffer packet)
             ssh_set_error(session, SSH_FATAL, "Failed to copy Curve25519 pubkey");
             goto error;
         }
+        if (ssh_string_len(client_pubkey) != CURVE25519_PUBKEY_SIZE) {
+            ssh_set_error(session,
+                          SSH_FATAL,
+                          "Incorrect length of received client Curve25519 pubkey");
+            goto error;
+        }
         memcpy(crypto->curve25519_client_pubkey,
                ssh_string_data(client_pubkey),
                CURVE25519_PUBKEY_SIZE);
@@ -584,6 +596,9 @@ int ssh_server_gss_kex_process_init(ssh_session session, ssh_buffer packet)
         goto error;
     }
     SSH_STRING_FREE(otoken);
+    if (client_name != GSS_C_NO_NAME) {
+        session->gssapi->canonic_user = ssh_gssapi_name_to_char(client_name);
+    }
     gss_release_name(&min_stat, &client_name);
     if (!(ret_flags & GSS_C_INTEG_FLAG) || !(ret_flags & GSS_C_MUTUAL_FLAG)) {
         SSH_LOG(SSH_LOG_WARN,

@@ -213,11 +213,17 @@ if (WITH_COVERAGE)
         NAME "coverage"
         EXECUTABLE make test
         DEPENDENCIES ssh tests)
-    set(GCOVR_ADDITIONAL_ARGS --xml-pretty --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors)
+    set(GCOVR_COMMON_ARGS --exclude-unreachable-branches --print-summary --gcov-ignore-parse-errors)
+    set(GCOVR_ADDITIONAL_ARGS --xml-pretty ${GCOVR_COMMON_ARGS})
     setup_target_for_coverage_gcovr_xml(
         NAME "coverage_xml"
         EXECUTABLE make test
         DEPENDENCIES ssh tests)
+    add_custom_target(coverage_json
+        COMMAND make test
+        COMMAND gcovr --json coverage.json ${GCOVR_COMMON_ARGS} --root ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DEPENDS ssh tests)
 endif (WITH_COVERAGE)
 
 add_custom_target(dist COMMAND ${CMAKE_MAKE_PROGRAM} package_source DEPENDS ${_SYMBOL_TARGET} VERBATIM)
@@ -253,6 +259,7 @@ message(STATUS "Blowfish cipher support: ${HAVE_BLOWFISH}")
 message(STATUS "PKCS #11 URI support: ${WITH_PKCS11_URI}")
 message(STATUS "With PKCS #11 provider support: ${WITH_PKCS11_PROVIDER}")
 message(STATUS "With FIDO2/U2F support: ${WITH_FIDO2}")
+message(STATUS "Continuous fuzzing in Differential Configuration fuzzer: ${FUZZ_CONTINUOUS_MODE}")
 if (WITH_FIDO2)
     message(STATUS "With libfido2 (internal usb-hid support): ${HAVE_LIBFIDO2}")
 endif (WITH_FIDO2)

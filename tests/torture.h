@@ -34,7 +34,7 @@
 #include "libssh/server.h"
 #include "libssh/sftp.h"
 
-#include <cmocka.h>
+#include "cmocka-compat.h"
 
 #include "tests_config.h"
 #include "torture_cmocka.h"
@@ -139,6 +139,9 @@ struct torture_sftp *torture_sftp_session(ssh_session session);
 struct torture_sftp *torture_sftp_session_channel(ssh_session session,
                                                   ssh_channel channel);
 void torture_sftp_close(struct torture_sftp *t);
+int torture_sftp_feed_packet(sftp_session sftp,
+                             uint8_t type,
+                             ssh_buffer payload);
 
 void torture_write_file(const char *filename, const char *data);
 
@@ -210,6 +213,7 @@ void torture_unsetenv(char const *variable);
 int torture_setup_ssh_agent(struct torture_state *s, const char *add_key);
 int torture_cleanup_ssh_agent(void);
 
+void torture_initialize(void);
 void torture_finalize(void);
 
 #endif /* _TORTURE_H */

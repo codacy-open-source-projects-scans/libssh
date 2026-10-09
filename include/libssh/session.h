@@ -117,6 +117,7 @@ enum ssh_pending_call_e {
 #define SSH_OPT_EXP_FLAG_PROXYCOMMAND 0x4
 #define SSH_OPT_EXP_FLAG_IDENTITY 0x8
 #define SSH_OPT_EXP_FLAG_CONTROL_PATH 0x10
+#define SSH_OPT_EXP_FLAG_USERNAME 0x20
 
 /* extensions flags */
 /* negotiation enabled */
@@ -288,11 +289,29 @@ struct ssh_session_struct {
         int control_master;
         char *control_path;
         int address_family;
+        int server_alive_interval;
+        int server_alive_count_max;
         bool batch_mode;
+        char *preferred_authentications;
+        int number_of_password_prompts;
+        int request_tty;
+        int escape_char;
+        struct ssh_list *local_forward;
+        struct ssh_iterator *local_forward_it;
+        struct ssh_list *remote_forward;
+        struct ssh_iterator *remote_forward_it;
+        struct ssh_list *send_env;
+        struct ssh_iterator *send_env_it;
         char *originalhost;        /* user-supplied host for config matching */
+        char *config_hostname; /* normalized HostName pattern, applied later */
         bool config_hostname_only; /* config hostname path: update host only,
                                       not originalhost */
         char *tag;                 /* configuration tag for Match tagged */
+        int pubkey_auth;
+        bool exit_on_forward_failure;
+        bool forward_agent;
+        char *forward_agent_sock_path;
+        bool gateway_ports;
     } opts;
 
     /* server options */
@@ -309,6 +328,30 @@ struct ssh_session_struct {
      * operations */
     struct ssh_pki_ctx_struct *pki_context;
 };
+
+/**
+ * @internal
+ *
+ * @brief Apply the reduced-authentication behavior for an unsafe host key
+ * continuation.
+ *
+ * When `StrictHostKeyChecking` is `off` and host key verification reports a
+ * changed or other key, OpenSSH allows the connection to continue only
+ * "subject to some restrictions"; see `ssh_config(5)` for
+ * `StrictHostKeyChecking` and `check_host_key()` in OpenSSH's `sshconnect.c`
+ * under the `continue_unsafe` label.  For libssh's supported client-side auth
+ * methods, this means disabling password and keyboard-interactive
+ * authentication for the rest of the session.
+ */
+static inline void ssh_known_hosts_continue_unsafe(ssh_session session)
+{
+    SSH_LOG(SSH_LOG_WARN,
+            "Continuing despite an unsafe host key with "
+            "StrictHostKeyChecking=off; password and keyboard-interactive "
+            "authentication have been disabled for this session");
+    session->opts.flags &=
+        ~(SSH_OPT_FLAG_PASSWORD_AUTH | SSH_OPT_FLAG_KBDINT_AUTH);
+}
 
 /** @internal
  * @brief a termination function evaluates the status of an object

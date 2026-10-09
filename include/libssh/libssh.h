@@ -96,19 +96,18 @@ struct ssh_counter_struct {
 };
 typedef struct ssh_counter_struct *ssh_counter;
 
-typedef struct ssh_agent_struct* ssh_agent;
-typedef struct ssh_buffer_struct* ssh_buffer;
-typedef struct ssh_channel_struct* ssh_channel;
-typedef struct ssh_message_struct* ssh_message;
-typedef struct ssh_pcap_file_struct* ssh_pcap_file;
-typedef struct ssh_key_struct* ssh_key;
-typedef struct ssh_scp_struct* ssh_scp;
-typedef struct ssh_session_struct* ssh_session;
-typedef struct ssh_string_struct* ssh_string;
-typedef struct ssh_event_struct* ssh_event;
-typedef struct ssh_connector_struct * ssh_connector;
+typedef struct ssh_agent_struct *ssh_agent;
+typedef struct ssh_buffer_struct *ssh_buffer;
+typedef struct ssh_channel_struct *ssh_channel;
+typedef struct ssh_message_struct *ssh_message;
+typedef struct ssh_pcap_file_struct *ssh_pcap_file;
+typedef struct ssh_key_struct *ssh_key;
+typedef struct ssh_session_struct *ssh_session;
+typedef struct ssh_string_struct *ssh_string;
+typedef struct ssh_event_struct *ssh_event;
+typedef struct ssh_connector_struct *ssh_connector;
 typedef struct ssh_pki_ctx_struct *ssh_pki_ctx;
-typedef void* ssh_gssapi_creds;
+typedef void *ssh_gssapi_creds;
 
 /* Socket type */
 #ifdef _WIN32
@@ -378,6 +377,43 @@ enum ssh_address_family_options_e {
     SSH_ADDRESS_FAMILY_INET6
 };
 
+enum ssh_strict_hostkey_options_e {
+    /** Disable strict checking for host keys and allow restricted fallback on
+       changes. */
+    SSH_STRICT_HOSTKEY_OFF = 0,
+    /** Require an existing known_hosts entry. */
+    SSH_STRICT_HOSTKEY_YES = 1,
+    /** Report unknown host keys to the caller for confirmation. */
+    SSH_STRICT_HOSTKEY_ASK = 2,
+    /** Automatically accept and store unknown host keys, but reject changes. */
+    SSH_STRICT_HOSTKEY_ACCEPT_NEW = 3
+};
+
+enum ssh_pubkey_auth_options_e {
+    /** Disable public key authentication. */
+    SSH_PUBKEY_AUTH_NO = 0,
+    /** Enable the default public key authentication behavior. */
+    SSH_PUBKEY_AUTH_ALL = 1,
+    /** Use unbound public key authentication only. */
+    SSH_PUBKEY_AUTH_UNBOUND = 2,
+    /** Use host-bound public key authentication when supported. */
+    SSH_PUBKEY_AUTH_HOST_BOUND = 3
+};
+
+/**
+ * @brief Enumeration of the different values for the RequestTTY option.
+ */
+enum ssh_request_tty_e {
+    /** Never request a TTY. */
+    SSH_REQUEST_TTY_NO = 0,
+    /** Always request a TTY. */
+    SSH_REQUEST_TTY_YES = 1,
+    /** Request a TTY when opening a login session. */
+    SSH_REQUEST_TTY_AUTO = 2,
+    /** Always request a TTY, even if a command is specified. */
+    SSH_REQUEST_TTY_FORCE = 3
+};
+
 enum ssh_options_e {
     SSH_OPTIONS_HOST,
     SSH_OPTIONS_PORT,
@@ -433,28 +469,23 @@ enum ssh_options_e {
     SSH_OPTIONS_GSSAPI_KEY_EXCHANGE,
     SSH_OPTIONS_GSSAPI_KEY_EXCHANGE_ALGS,
     SSH_OPTIONS_NEXT_IDENTITY,
+    SSH_OPTIONS_SERVER_ALIVE_INTERVAL,
+    SSH_OPTIONS_SERVER_ALIVE_COUNT_MAX,
     SSH_OPTIONS_BATCH_MODE,
-};
-
-enum {
-  /** Code is going to write/create remote files */
-  SSH_SCP_WRITE,
-  /** Code is going to read remote files */
-  SSH_SCP_READ,
-  SSH_SCP_RECURSIVE=0x10
-};
-
-enum ssh_scp_request_types {
-  /** A new directory is going to be pulled */
-  SSH_SCP_REQUEST_NEWDIR=1,
-  /** A new file is going to be pulled */
-  SSH_SCP_REQUEST_NEWFILE,
-  /** End of requests */
-  SSH_SCP_REQUEST_EOF,
-  /** End of directory */
-  SSH_SCP_REQUEST_ENDDIR,
-  /** Warning received */
-  SSH_SCP_REQUEST_WARNING
+    SSH_OPTIONS_PREFERRED_AUTHENTICATIONS,
+    SSH_OPTIONS_NUMBER_OF_PASSWORD_PROMPTS,
+    SSH_OPTIONS_REQUEST_TTY,
+    SSH_OPTIONS_ESCAPE_CHAR,
+    SSH_OPTIONS_LOCAL_FORWARD,
+    SSH_OPTIONS_NEXT_LOCAL_FORWARD,
+    SSH_OPTIONS_REMOTE_FORWARD,
+    SSH_OPTIONS_NEXT_REMOTE_FORWARD,
+    SSH_OPTIONS_SEND_ENV,
+    SSH_OPTIONS_NEXT_SEND_ENV,
+    SSH_OPTIONS_EXIT_ON_FORWARD_FAILURE,
+    SSH_OPTIONS_FORWARD_AGENT,
+    SSH_OPTIONS_FORWARD_AGENT_SOCK_PATH,
+    SSH_OPTIONS_GATEWAY_PORTS,
 };
 
 enum ssh_connector_flags_e {
@@ -598,26 +629,6 @@ SSH_DEPRECATED LIBSSH_API int ssh_is_server_known(ssh_session session);
 SSH_DEPRECATED LIBSSH_API void ssh_print_hexa(const char *descr, const unsigned char *what, size_t len);
 SSH_DEPRECATED LIBSSH_API int ssh_channel_select(ssh_channel *readchans, ssh_channel *writechans, ssh_channel *exceptchans, struct
         timeval * timeout);
-
-SSH_DEPRECATED LIBSSH_API int ssh_scp_accept_request(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_close(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_deny_request(ssh_scp scp, const char *reason);
-SSH_DEPRECATED LIBSSH_API void ssh_scp_free(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_init(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_leave_directory(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API ssh_scp ssh_scp_new(ssh_session session, int mode, const char *location);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_pull_request(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_push_directory(ssh_scp scp, const char *dirname, int mode);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_push_file(ssh_scp scp, const char *filename, size_t size, int perms);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_push_file64(ssh_scp scp, const char *filename, uint64_t size, int perms);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_read(ssh_scp scp, void *buffer, size_t size);
-SSH_DEPRECATED LIBSSH_API const char *ssh_scp_request_get_filename(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_request_get_permissions(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API size_t ssh_scp_request_get_size(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API uint64_t ssh_scp_request_get_size64(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API const char *ssh_scp_request_get_warning(ssh_scp scp);
-SSH_DEPRECATED LIBSSH_API int ssh_scp_write(ssh_scp scp, const void *buffer, size_t len);
-
 
 LIBSSH_API int ssh_get_random(void *where,int len,int strong);
 LIBSSH_API int ssh_get_version(ssh_session session);
@@ -860,6 +871,7 @@ LIBSSH_API const char *ssh_userauth_kbdint_getanswer(ssh_session session, unsign
 LIBSSH_API int ssh_userauth_kbdint_setanswer(ssh_session session, unsigned int i,
     const char *answer);
 LIBSSH_API int ssh_userauth_gssapi(ssh_session session);
+LIBSSH_API int ssh_userauth_gssapi_keyex(ssh_session session);
 LIBSSH_API const char *ssh_version(int req_version);
 
 LIBSSH_API void ssh_string_burn(ssh_string str);
@@ -899,6 +911,7 @@ LIBSSH_API void ssh_event_free(ssh_event event);
 LIBSSH_API const char* ssh_get_clientbanner(ssh_session session);
 LIBSSH_API const char* ssh_get_serverbanner(ssh_session session);
 LIBSSH_API const char* ssh_get_kex_algo(ssh_session session);
+LIBSSH_API bool ssh_session_kex_is_gss(ssh_session session);
 LIBSSH_API const char* ssh_get_cipher_in(ssh_session session);
 LIBSSH_API const char* ssh_get_cipher_out(ssh_session session);
 LIBSSH_API const char* ssh_get_hmac_in(ssh_session session);

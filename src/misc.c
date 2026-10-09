@@ -1311,6 +1311,7 @@ char *ssh_path_expand_tilde(const char *d)
     const char *p = NULL;
     size_t ld;
     size_t lh = 0;
+    int add_slash = 0;
 
     if (d[0] != '~') {
         return strdup(d);
@@ -1336,20 +1337,28 @@ char *ssh_path_expand_tilde(const char *d)
         if (pw == NULL) {
             return NULL;
         }
-        ld = strlen(p);
         h = strdup(pw->pw_dir);
 #endif
     } else {
-        ld = strlen(d);
         p = (char *) d;
         h = ssh_get_user_home_dir(NULL);
     }
+
     if (h == NULL) {
         return NULL;
     }
     lh = strlen(h);
 
-    r = malloc(ld + lh + 1);
+    /* Strip all leading slashes from the suffix path */
+    while (*p == '/') {
+        p++;
+    }
+    ld = strlen(p);
+
+    /* Does the home directory path end with a slash? */
+    add_slash = (lh > 0 && h[lh - 1] == '/') ? 0 : 1;
+
+    r = malloc(lh + add_slash + ld + 1);
     if (r == NULL) {
         SAFE_FREE(h);
         return NULL;
@@ -1359,7 +1368,11 @@ char *ssh_path_expand_tilde(const char *d)
         memcpy(r, h, lh);
     }
     SAFE_FREE(h);
-    memcpy(r + lh, p, ld + 1);
+
+    if (add_slash) {
+        r[lh] = '/';
+    }
+    memcpy(r + lh + add_slash, p, ld + 1);
 
     return r;
 }
@@ -1469,26 +1482,13 @@ err:
     return NULL;
 }
 
-/** @internal
- * @brief expands a string in function of session options
- *
- * @param[in] session  The SSH session providing option values for expansion.
- * @param[in] s Format string to expand. Known parameters:
- *               - %d user home directory (~)
- *               - %h target host name
- *               - %u local username
- *               - %l local hostname
- *               - %r remote username
- *               - %p remote port
- *               - %j proxyjump string
- *               - %C Hash of %l%h%p%r%j
- *
- * @returns Expanded string. The caller needs to free the memory using
- *          ssh_string_free_char().
- *
- * @see ssh_string_free_char()
+/* Internal expansion helper. hostname_lenient preserves unknown %X tokens
+ * literally for HostName handling.
  */
-char *ssh_path_expand_escape(ssh_session session, const char *s)
+static char *ssh_path_expand_internal(ssh_session session,
+                                      const char *s,
+                                      bool hostname_lenient,
+                                      bool expand_tilde)
 {
     char *buf = NULL;
     char *r = NULL;
@@ -1496,7 +1496,11 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
     const char *p = NULL;
     size_t i, l;
 
-    r = ssh_path_expand_tilde(s);
+    if (expand_tilde) {
+        r = ssh_path_expand_tilde(s);
+    } else {
+        r = strdup(s);
+    }
     if (r == NULL) {
         ssh_set_error_oom(session);
         return NULL;
@@ -1520,7 +1524,6 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
 
     for (i = 0; *p != '\0'; p++) {
         if (*p != '%') {
-        escape:
             buf[i] = *p;
             i++;
             if (i >= MAX_BUF_SIZE) {
@@ -1534,12 +1537,51 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
 
         p++;
         if (*p == '\0') {
+            /* HostName expansion rejects trailing '%' to match the parse-time
+             * scan. Keep the general expansion path unchanged, where a
+             * trailing '%' is truncated.
+             */
+            if (hostname_lenient) {
+                ssh_set_error(session, SSH_FATAL, "Incomplete Hostname token");
+                free(buf);
+                free(r);
+                return NULL;
+            }
             break;
+        }
+
+        if (hostname_lenient && *p != '%' && *p != 'h') {
+            buf[i] = '%';
+            i++;
+            if (i >= MAX_BUF_SIZE) {
+                ssh_set_error(session, SSH_FATAL, "String too long");
+                free(buf);
+                free(r);
+                return NULL;
+            }
+            buf[i] = *p;
+            i++;
+            if (i >= MAX_BUF_SIZE) {
+                ssh_set_error(session, SSH_FATAL, "String too long");
+                free(buf);
+                free(r);
+                return NULL;
+            }
+            buf[i] = '\0';
+            continue;
         }
 
         switch (*p) {
         case '%':
-            goto escape;
+            buf[i] = '%';
+            i++;
+            if (i >= MAX_BUF_SIZE) {
+                free(buf);
+                free(r);
+                return NULL;
+            }
+            buf[i] = '\0';
+            continue;
         case 'd':
             x = ssh_get_user_home_dir(session);
             if (x == NULL) {
@@ -1562,6 +1604,18 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
                 x = strdup(session->opts.originalhost);
             } else {
                 ssh_set_error(session, SSH_FATAL, "Cannot expand host");
+                free(buf);
+                free(r);
+                return NULL;
+            }
+            break;
+        case 'n':
+            if (session->opts.originalhost) {
+                x = strdup(session->opts.originalhost);
+            } else {
+                ssh_set_error(session,
+                              SSH_FATAL,
+                              "Cannot expand original host");
                 free(buf);
                 free(r);
                 return NULL;
@@ -1633,6 +1687,56 @@ char *ssh_path_expand_escape(ssh_session session, const char *s)
         free(buf);
     }
     return x;
+}
+
+/**
+ * @brief Expand a string using session option values.
+ *
+ * @param[in] session  The SSH session providing option values for expansion.
+ * @param[in] s        Format string to expand.
+ *
+ * Supported tokens:
+ *               - %d user home directory (~)
+ *               - %h target host name
+ *               - %u local username
+ *               - %l local hostname
+ *               - %r remote username
+ *               - %p remote port
+ *               - %j proxyjump string
+ *               - %C Hash of %l%h%p%r%j
+ *               - %n original target host name
+ *
+ * @returns Expanded string. The caller needs to free the memory using
+ *          ssh_string_free_char().
+ *
+ * @see ssh_string_free_char()
+ */
+char *ssh_path_expand_escape(ssh_session session, const char *s)
+{
+    return ssh_path_expand_internal(session, s, false, true);
+}
+
+char *ssh_string_expand_escape(ssh_session session, const char *s)
+{
+    return ssh_path_expand_internal(session, s, false, false);
+}
+
+/**
+ * @brief Expand HostName tokens.
+ *
+ * @param[in] session  The SSH session providing option values for expansion.
+ * @param[in] s        HostName pattern to expand.
+ *
+ * Like ssh_path_expand_escape(), but only interprets %% and %h. Other %X
+ * tokens are preserved literally. Literal hostname text and %h expansions are
+ * normalized to lowercase.
+ *
+ * @returns Expanded string. The caller needs to free the memory using
+ *          ssh_string_free_char().
+ */
+char *ssh_path_expand_hostname(ssh_session session, const char *s)
+{
+    return ssh_path_expand_internal(session, s, true, false);
 }
 
 /**
@@ -1807,19 +1911,30 @@ ssh_timestamp_difference(struct ssh_timestamp *old, struct ssh_timestamp *new)
  * into millisecond value
  * @param[in] sec number of seconds
  * @param[in] usec number of microseconds
- * @returns milliseconds, or 10000 if user supplied values are equal to zero
+ * @returns milliseconds, or 10000 if user supplied values are equal to zero.
+ *          Finite values larger than INT_MAX milliseconds are capped to
+ *          INT_MAX.
  */
 int ssh_make_milliseconds(unsigned long sec, unsigned long usec)
 {
-	unsigned long res = usec ? (usec / 1000) : 0;
-	res += (sec * 1000);
-	if (res == 0) {
-		res = 10 * 1000; /* use a reasonable default value in case
-				* SSH_OPTIONS_TIMEOUT is not set in options. */
-	}
+    unsigned long res;
+
+    if (sec == (unsigned long)SSH_TIMEOUT_INFINITE) {
+        return SSH_TIMEOUT_INFINITE;
+    }
+    if (sec > (unsigned long)INT_MAX / 1000) {
+        return INT_MAX;
+    }
+
+    res = usec / 1000;
+    res += (sec * 1000);
+    if (res == 0) {
+        res = 10 * 1000; /* use a reasonable default value in case
+                          * SSH_OPTIONS_TIMEOUT is not set in options. */
+    }
 
     if (res > INT_MAX) {
-        return SSH_TIMEOUT_INFINITE;
+        return INT_MAX;
     } else {
         return (int)res;
     }
@@ -2251,7 +2366,7 @@ err:
  */
 char *ssh_strreplace(const char *src, const char *pattern, const char *replace)
 {
-    char *p = NULL;
+    const char *p = NULL;
     char *src_replaced = NULL;
 
     if (src == NULL) {
@@ -2518,11 +2633,12 @@ int ssh_check_username_syntax(const char *username)
 
     username_len = strlen(username);
     if (username_len == 0 || username[username_len - 1] == '\\' ||
-        strpbrk(username, "'`\";&<>|(){}") != NULL) {
+        strpbrk(username, SSH_DANGEROUS_SHELL_CHARS) != NULL) {
         return SSH_ERROR;
     }
     for (size_t i = 0; i < username_len; i++) {
-        if (isspace(username[i]) != 0 && username[i + 1] == '-') {
+        unsigned char c = (unsigned char)username[i];
+        if (iscntrl(c) != 0 || (isspace(c) != 0 && username[i + 1] == '-')) {
             return SSH_ERROR;
         }
     }

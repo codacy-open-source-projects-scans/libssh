@@ -25,7 +25,7 @@ set(LIBSSH_CLIENT_TESTS
     )
 
 find_program(SCP_EXECUTABLE NAMES scp)
-if (SCP_EXECUTABLE)
+if (WITH_SCP AND SCP_EXECUTABLE)
     set(LIBSSH_CLIENT_TESTS
         ${LIBSSH_CLIENT_TESTS}
         torture_scp)
@@ -84,6 +84,7 @@ if (WITH_SFTP)
         torture_sftp_packet_read
         torture_sftp_recv_response_msg
         torture_sftp_get_users_groups_by_id
+        torture_sftp_request_id
         ${SFTP_BENCHMARK_TESTS})
 endif (WITH_SFTP)
 
@@ -98,9 +99,19 @@ foreach(_CLI_TEST ${LIBSSH_CLIENT_TESTS})
     )
 
     if (_CLI_TEST STREQUAL "torture_tinyssh")
-        target_compile_definitions(${_CLI_TEST} PRIVATE 
+        target_compile_definitions(${_CLI_TEST} PRIVATE
             TINYSSH_KEYS_DIR="${TINYSSH_KEY_DIR}"
         )
+    endif()
+
+    set(_TEST_ENV ${TORTURE_CLIENT_ENVIRONMENT})
+    # Do not use system openssl.cnf for the pkcs11 uri tests.
+    # It can load a pkcs11 provider too early before we will set up environment
+    # variables that are needed for the pkcs11 provider to access correct
+    # tokens, causing unexpected failures.
+    # Make sure this comes before ssh_init(), which initializes OpenSSL!
+    if (_CLI_TEST STREQUAL "torture_auth_pkcs11")
+        list(APPEND _TEST_ENV OPENSSL_CONF=${CMAKE_SOURCE_DIR}/tests/etc/openssl.cnf)
     endif()
 
     if (OSX)
@@ -114,6 +125,6 @@ foreach(_CLI_TEST ${LIBSSH_CLIENT_TESTS})
             TEST
                 ${_CLI_TEST}
             PROPERTY
-                ENVIRONMENT ${TORTURE_CLIENT_ENVIRONMENT})
+                ENVIRONMENT ${_TEST_ENV})
     endif()
 endforeach()

@@ -268,6 +268,9 @@
 /* Define to 1 if you want to enable SFTP */
 #cmakedefine WITH_SFTP 1
 
+/* Define to 1 if you want to enable SCP support */
+#cmakedefine WITH_SCP 1
+
 /* Define to 1 if you want to enable server support */
 #cmakedefine WITH_SERVER 1
 
@@ -308,6 +311,10 @@
 
 /* Define to 1 if you want to enable FIDO2/U2F support */
 #cmakedefine WITH_FIDO2 1
+
+/* Define to 1 if you want to enable continuous fuzzing by logging divergences to a 'bugs' directory
+ * instead of crashing immediately. Note: This is only applicable to the differential fuzzer. */
+#cmakedefine FUZZ_CONTINUOUS_MODE 1
 
 /*************************** ENDIAN *****************************/
 

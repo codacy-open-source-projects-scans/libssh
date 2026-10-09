@@ -43,6 +43,8 @@
 #define chdir _chdir
 #endif
 
+#include "libssh/buffer.h"
+#include "libssh/channels.h"
 #include "libssh/libssh.h"
 #include "libssh/misc.h"
 #include "libssh/token.h"
@@ -91,7 +93,7 @@ static const char *pattern = NULL;
 /* TODO missing code coverage */
 static int _torture_auth_kbdint(ssh_session session, const char *password)
 {
-    const char *prompt;
+    const char *prompt = NULL;
     char echo;
     int err;
 
@@ -129,10 +131,10 @@ static int _torture_auth_kbdint(ssh_session session, const char *password)
 
 int torture_rmdirs(const char *path)
 {
-    DIR *d;
-    struct dirent *dp;
+    DIR *d = NULL;
+    struct dirent *dp = NULL;
     struct stat sb;
-    char *fname;
+    char *fname = NULL;
 
     if ((d = opendir(path)) != NULL) {
         while (stat(path, &sb) == 0) {
@@ -301,7 +303,7 @@ ssh_session torture_ssh_session(struct torture_state *s,
                                 const char *user,
                                 const char *password)
 {
-    ssh_session session;
+    ssh_session session = NULL;
     int method;
     int rc;
 
@@ -596,9 +598,9 @@ out:
 struct torture_sftp *torture_sftp_session_channel(ssh_session session,
                                                   ssh_channel channel)
 {
-    struct torture_sftp *t;
+    struct torture_sftp *t = NULL;
     char template[] = "/tmp/ssh_torture_XXXXXX";
-    char *p;
+    char *p = NULL;
     int rc;
 
     if (session == NULL) {
@@ -683,6 +685,40 @@ void torture_sftp_close(struct torture_sftp *t)
     free(t->testdir);
     free(t);
 }
+
+/**
+ * @brief Append a fabricated SFTP packet to a channel's stdout buffer
+ *
+ * The packet is framed [uint32 length][uint8 type][payload], the same framing
+ * sftp_packet_write() applies to outgoing packets. The SFTP read path returns
+ * buffered channel data before polling the socket.
+ *
+ * @param[in] sftp     The SFTP session
+ * @param[in] type     The SFTP message type, one of the SSH_FXP_* constants
+ * @param[in] payload  The message body, without the length and type fields
+ *
+ * @return             SSH_OK on success, SSH_ERROR on error
+ */
+int torture_sftp_feed_packet(sftp_session sftp,
+                             uint8_t type,
+                             ssh_buffer payload)
+{
+    uint32_t len;
+
+    if (sftp == NULL || sftp->channel == NULL ||
+        sftp->channel->stdout_buffer == NULL || payload == NULL) {
+        return SSH_ERROR;
+    }
+
+    len = (uint32_t)(ssh_buffer_get_len(payload) + sizeof(uint8_t));
+
+    return ssh_buffer_pack(sftp->channel->stdout_buffer,
+                           "dbP",
+                           len,
+                           type,
+                           (size_t)ssh_buffer_get_len(payload),
+                           ssh_buffer_get(payload));
+}
 #endif /* WITH_SFTP */
 
 int torture_server_port(void)
@@ -744,8 +780,8 @@ const char *torture_server1_address(int family)
 
 void torture_setup_socket_dir(void **state)
 {
-    struct torture_state *s;
-    const char *p;
+    struct torture_state *s = NULL;
+    const char *p = NULL;
     size_t len;
     char *env = NULL;
     char gss_dir[1024] = {0};
@@ -1264,7 +1300,7 @@ void torture_set_env_from_str(const char *env)
  * */
 void torture_setup_libssh_server(void **state, const char *server_path)
 {
-    struct torture_state *s;
+    struct torture_state *s = NULL;
     char start_cmd[1024];
     char timeout_cmd[512];
     char env[1024];
@@ -1679,32 +1715,35 @@ void torture_setup_tokens(const char *temp_dir,
 
     rc = snprintf(token_setup_start_cmd,
                   sizeof(token_setup_start_cmd),
-                  "%s/tests/pkcs11/setup-softhsm-tokens.sh %s %s %s %s %s",
+                  "%s/tests/pkcs11/setup-soft-tokens.sh %s %s %s %s %s",
                   BINARYDIR,
                   temp_dir,
                   filename,
                   object_name,
                   load_public,
-                  SOFTHSM2_LIBRARY);
+                  SOFT_TOKEN_MODULE);
     assert_int_not_equal(rc, sizeof(token_setup_start_cmd));
 
     rc = system(token_setup_start_cmd);
     assert_return_code(rc, errno);
 
 #ifdef WITH_PKCS11_PROVIDER
-    setenv("PKCS11_PROVIDER_MODULE", SOFTHSM2_LIBRARY, 1);
+    setenv("PKCS11_PROVIDER_MODULE", SOFT_TOKEN_MODULE, 1);
 
     /* This is useful for debugging PKCS#11 calls */
     env = getenv("TORTURE_PKCS11");
     if (env != NULL && env[0] != '\0') {
 #ifdef PKCS11SPY
-        setenv("PKCS11SPY", SOFTHSM2_LIBRARY, 1);
+        setenv("PKCS11SPY", SOFT_TOKEN_MODULE, 1);
         setenv("PKCS11_PROVIDER_MODULE", PKCS11SPY, 1);
 #else
         fprintf(stderr, "[ TORTURE  ] >>> pkcs11-spy not found\n");
 #endif /* PKCS11SPY */
     }
 #endif /* WITH_PKCS11_PROVIDER */
+
+    snprintf(conf_path, sizeof(conf_path), "%s/kryoptic.conf", temp_dir);
+    setenv("KRYOPTIC_CONF", conf_path, 1);
 
     snprintf(conf_path, sizeof(conf_path), "%s/softhsm.conf", temp_dir);
     setenv("SOFTHSM2_CONF", conf_path, 1);
@@ -1713,6 +1752,7 @@ void torture_setup_tokens(const char *temp_dir,
 void torture_cleanup_tokens(const char *temp_dir)
 {
     unsetenv("SOFTHSM2_CONF");
+    unsetenv("KRYOPTIC_CONF");
 }
 #endif /* WITH_PKCS11_URI */
 
@@ -2093,8 +2133,35 @@ void torture_write_file(const char *filename, const char *data)
 void torture_reset_config(ssh_session session)
 {
     memset(session->opts.options_seen, 0, sizeof(session->opts.options_seen));
+    SAFE_FREE(session->opts.config_hostname);
+    session->opts.rekey_data = 0;
+    session->opts.rekey_time = 0;
     if (ssh_libssh_proxy_jumps()) {
         ssh_proxyjumps_free(session->opts.proxy_jumps);
+    }
+    if (session->opts.local_forward) {
+        char *entry = NULL;
+        for (entry = ssh_list_pop_head(char *, session->opts.local_forward);
+             entry != NULL;
+             entry = ssh_list_pop_head(char *, session->opts.local_forward)) {
+            SAFE_FREE(entry);
+        }
+    }
+    if (session->opts.remote_forward) {
+        char *entry = NULL;
+        for (entry = ssh_list_pop_head(char *, session->opts.remote_forward);
+             entry != NULL;
+             entry = ssh_list_pop_head(char *, session->opts.remote_forward)) {
+            SAFE_FREE(entry);
+        }
+    }
+    if (session->opts.send_env) {
+        char *pat = NULL;
+        for (pat = ssh_list_pop_head(char *, session->opts.send_env);
+             pat != NULL;
+             pat = ssh_list_pop_head(char *, session->opts.send_env)) {
+            SAFE_FREE(pat);
+        }
     }
     SAFE_FREE(session->opts.tag);
 }
@@ -2136,6 +2203,29 @@ __attribute__((weak)) int torture_run_tests(void)
 #endif /* defined(HAVE_WEAK_ATTRIBUTE) && defined(TORTURE_SHARED) */
 
 /**
+ * Initialize torture context. No-op except for OpenSSL or GSSAPI
+ *
+ * Applications using OpenSSL are expected to call OPENSSL_init_crypto() before
+ * any cryptographic operation is started. If not done, this is called from
+ * within the first OpenSSL API crypto call, which works ok if we are not
+ * calling the first operation from threads and in FIPS mode.
+ *
+ * Calling this function from ssh_crypto_init() does not sounds like a good idea
+ * either as we really can not know if the libssh is the first and only
+ * library using openssl in the address space.
+ *
+ * This needs to be called at the start of the main function, most importantly
+ * for the tests using threads.
+ */
+void torture_initialize(void)
+{
+#if defined(HAVE_LIBCRYPTO) || defined(WITH_GSSAPI)
+    int r = OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL);
+    assert_int_equal(r, 1);
+#endif
+}
+
+/**
  * Finalize the torture context. No-op except for OpenSSL or GSSAPI
  *
  * When OpenSSL is built without the at-exit handlers, it won't call the
@@ -2160,6 +2250,8 @@ int main(int argc, char **argv)
     struct argument_s arguments;
     char *env = getenv("LIBSSH_VERBOSITY");
     int rv;
+
+    torture_initialize();
 
     arguments.verbose = 0;
     arguments.pattern = NULL;

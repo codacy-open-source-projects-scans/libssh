@@ -40,6 +40,7 @@
 #include "libssh/options.h"
 #include "libssh/misc.h"
 #include "libssh/pki.h"
+#include "libssh/libssh.h"
 #include "libssh/dh.h"
 #include "libssh/knownhosts.h"
 #include "libssh/token.h"
@@ -386,6 +387,7 @@ static void ssh_knownhosts_entries_free(struct ssh_list *entry_list)
     }
     ssh_list_free(entry_list);
 }
+
 /**
  * @internal
  *
@@ -673,6 +675,7 @@ int ssh_known_hosts_parse_line(const char *hostname,
     struct ssh_knownhosts_entry *e = NULL;
     char *known_host = NULL;
     char *p = NULL;
+    const char *cp = NULL;
     char *save_tok = NULL;
     enum ssh_keytypes_e key_type;
     int match = 0;
@@ -806,9 +809,9 @@ int ssh_known_hosts_parse_line(const char *hostname,
     /* comment */
     p = strtok_r(NULL, " ", &save_tok);
     if (p != NULL) {
-        p = strstr(line, p);
-        if (p != NULL) {
-            e->comment = strdup(p);
+        cp = strstr(line, p);
+        if (cp != NULL) {
+            e->comment = strdup(cp);
             if (e->comment == NULL) {
                 rc = SSH_ERROR;
                 goto out;
@@ -1152,6 +1155,13 @@ ssh_known_hosts_check_server_key(const char *hosts_entry,
     return found;
 }
 
+static bool ssh_known_hosts_should_continue_unsafe(ssh_session session,
+                                                   enum ssh_known_hosts_e rv)
+{
+    return session->opts.StrictHostKeyChecking == SSH_STRICT_HOSTKEY_OFF &&
+           (rv == SSH_KNOWN_HOSTS_CHANGED || rv == SSH_KNOWN_HOSTS_OTHER);
+}
+
 /**
  * @brief Get the known_hosts entry for the currently connected session.
  *
@@ -1164,11 +1174,22 @@ ssh_known_hosts_check_server_key(const char *hosts_entry,
  *                                     are under attack or the administrator
  *                                     changed the key. You HAVE to warn the
  *                                     user about a possible attack.\n
+ *                                     Note: When GSSAPI key exchange is used,
+ *                                     host keys may change frequently and
+ *                                     without advance warning per RFC 4462.
+ *                                     Clients SHOULD NOT issue strong warnings
+ *                                     or abort when this occurs with GSSAPI
+ *                                     key exchange.\n
  *          SSH_KNOWN_HOSTS_OTHER:     The server gave use a key of a type while
  *                                     we had an other type recorded. It is a
  *                                     possible attack.\n
  *          SSH_KNOWN_HOSTS_UNKNOWN:   The server is unknown. User should
- *                                     confirm the public key hash is correct.\n
+ *                                     confirm the public key hash is correct.
+ *                                     This is also returned when GSSAPI key
+ *                                     exchange with null hostkey is negotiated,
+ *                                     as there is no host key to verify, or when
+ *                                     the server does not send the host key despite
+ *                                     negotiating a non-null host key algorithm.\n
  *          SSH_KNOWN_HOSTS_NOT_FOUND: The known host file does not exist. The
  *                                     host is thus unknown. File will be
  *                                     created if host key is accepted.\n
@@ -1181,6 +1202,11 @@ ssh_session_get_known_hosts_entry(ssh_session session,
                                   struct ssh_knownhosts_entry **pentry)
 {
     enum ssh_known_hosts_e old_rv, rv = SSH_KNOWN_HOSTS_UNKNOWN;
+    int rc;
+
+    if (pentry != NULL) {
+        *pentry = NULL;
+    }
 
     if (session->opts.knownhosts == NULL) {
         if (ssh_options_apply(session) < 0) {
@@ -1205,11 +1231,40 @@ ssh_session_get_known_hosts_entry(ssh_session session,
                                                 session->opts.global_knownhosts,
                                                 pentry);
 
-    /* If we did not find any match at all:  we report the previous result */
-    if (rv == SSH_KNOWN_HOSTS_UNKNOWN) {
-        if (session->opts.StrictHostKeyChecking == 0) {
+    if (ssh_known_hosts_should_continue_unsafe(session, rv)) {
+        ssh_known_hosts_continue_unsafe(session);
+        return SSH_KNOWN_HOSTS_OK;
+    }
+
+    /* If the global file did not help, report the result from the user file. */
+    if (rv == SSH_KNOWN_HOSTS_UNKNOWN || rv == SSH_KNOWN_HOSTS_NOT_FOUND) {
+        if (ssh_known_hosts_should_continue_unsafe(session, old_rv)) {
+            ssh_known_hosts_continue_unsafe(session);
             return SSH_KNOWN_HOSTS_OK;
         }
+
+        if ((old_rv == SSH_KNOWN_HOSTS_UNKNOWN ||
+             old_rv == SSH_KNOWN_HOSTS_NOT_FOUND) &&
+            (session->opts.StrictHostKeyChecking == SSH_STRICT_HOSTKEY_OFF ||
+             session->opts.StrictHostKeyChecking ==
+                 SSH_STRICT_HOSTKEY_ACCEPT_NEW)) {
+            rc = ssh_session_update_known_hosts(session);
+            if (rc != SSH_OK) {
+                return SSH_KNOWN_HOSTS_ERROR;
+            }
+
+            rv =
+                ssh_session_get_known_hosts_entry_file(session,
+                                                       session->opts.knownhosts,
+                                                       pentry);
+            if (rv == SSH_KNOWN_HOSTS_UNKNOWN ||
+                rv == SSH_KNOWN_HOSTS_NOT_FOUND) {
+                return SSH_KNOWN_HOSTS_OK;
+            }
+
+            return rv;
+        }
+
         return old_rv;
     }
 
@@ -1258,6 +1313,15 @@ ssh_session_get_known_hosts_entry_file(ssh_session session,
 
     server_pubkey = ssh_dh_get_current_server_publickey(session);
     if (server_pubkey == NULL) {
+#ifdef WITH_GSSAPI
+        /* After GSSAPI key exchange, sending the host key is optional
+         * because the server is already authenticated via Kerberos.
+         * Return SSH_KNOWN_HOSTS_UNKNOWN if there is no host key
+         * to let the application decide how to handle this case. */
+        if (ssh_session_kex_is_gss(session)) {
+            return SSH_KNOWN_HOSTS_UNKNOWN;
+        }
+#endif
         ssh_set_error(session,
                       SSH_FATAL,
                       "ssh_session_is_known_host called without a "

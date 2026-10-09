@@ -1,5 +1,7 @@
 #include "config.h"
 
+#include <limits.h>
+
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -307,6 +309,19 @@ static void torture_path_expand_escape(void **state) {
     ssh_string_free_char(e);
 }
 
+static void torture_path_expand_original_host_required(void **state)
+{
+    ssh_session session = *state;
+    char *e = NULL;
+
+    assert_null(session->opts.originalhost);
+    session->opts.host = strdup("meditation");
+
+    e = ssh_path_expand_escape(session, "%n");
+    assert_null(e);
+    assert_non_null(ssh_get_error(session));
+}
+
 static void torture_path_expand_known_hosts(void **state) {
     ssh_session session = *state;
     char *tmp;
@@ -333,6 +348,38 @@ static void torture_path_expand_percent(void **state) {
     free(tmp);
 }
 
+static void torture_path_expand_hostname_unknown_token(void **state)
+{
+    ssh_session session = *state;
+    char *tmp = NULL;
+
+    session->opts.host = strdup("Meditation");
+    assert_non_null(session->opts.host);
+
+    tmp = ssh_path_expand_hostname(session, "%h-%p.example.com");
+    assert_non_null(tmp);
+    assert_string_equal(tmp, "Meditation-%p.example.com");
+    free(tmp);
+
+    tmp = ssh_path_expand_hostname(session, "%h-%P.ExAmPlE.CoM");
+    assert_non_null(tmp);
+    assert_string_equal(tmp, "Meditation-%P.ExAmPlE.CoM");
+    free(tmp);
+}
+
+static void torture_path_expand_hostname_trailing_percent(void **state)
+{
+    ssh_session session = *state;
+    bool is_null;
+    char *tmp = NULL;
+
+    tmp = ssh_path_expand_hostname(session, "foo-%");
+    is_null = (tmp == NULL);
+    free(tmp);
+    assert_true(is_null);
+    assert_string_equal(ssh_get_error(session), "Incomplete Hostname token");
+}
+
 static void torture_timeout_elapsed(void **state){
     struct ssh_timestamp ts;
     (void) state;
@@ -352,10 +399,25 @@ static void torture_timeout_update(void **state){
     ssh_timestamp_init(&ts);
     usleep(50000);
     assert_int_equal(ssh_timeout_update(&ts,25), 0);
-    assert_in_range(ssh_timeout_update(&ts,30000),29000,29960);
-    assert_in_range(ssh_timeout_update(&ts,500),1,460);
+    assert_int_in_range(ssh_timeout_update(&ts, 30000), 29000, 29960);
+    assert_int_in_range(ssh_timeout_update(&ts, 500), 1, 460);
     assert_int_equal(ssh_timeout_update(&ts,0),0);
     assert_int_equal(ssh_timeout_update(&ts,-1),-1);
+}
+
+static void torture_make_milliseconds(void **state)
+{
+    (void)state;
+
+    assert_int_equal(ssh_make_milliseconds(30, 500000), 30500);
+    assert_int_equal(ssh_make_milliseconds(0, 0), 10000);
+    assert_int_equal(
+        ssh_make_milliseconds((unsigned long)SSH_TIMEOUT_INFINITE, 0),
+        SSH_TIMEOUT_INFINITE);
+    assert_int_equal(ssh_make_milliseconds(30L * 24 * 60 * 60, 0), INT_MAX);
+    assert_int_equal(
+        ssh_make_milliseconds((unsigned long)INT_MAX / 1000, 999999),
+        INT_MAX);
 }
 
 static void torture_ssh_analyze_banner(void **state) {
@@ -1445,12 +1507,25 @@ int torture_run_tests(void) {
         cmocka_unit_test_setup_teardown(torture_path_expand_escape,
                                         setup,
                                         teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_path_expand_original_host_required,
+            setup,
+            teardown),
         cmocka_unit_test_setup_teardown(torture_path_expand_known_hosts,
                                         setup,
                                         teardown),
         cmocka_unit_test_setup_teardown(torture_path_expand_percent,
                                         setup,
                                         teardown),
+        cmocka_unit_test(torture_make_milliseconds),
+        cmocka_unit_test_setup_teardown(
+            torture_path_expand_hostname_unknown_token,
+            setup,
+            teardown),
+        cmocka_unit_test_setup_teardown(
+            torture_path_expand_hostname_trailing_percent,
+            setup,
+            teardown),
         cmocka_unit_test(torture_timeout_elapsed),
         cmocka_unit_test(torture_timeout_update),
         cmocka_unit_test(torture_ssh_analyze_banner),
